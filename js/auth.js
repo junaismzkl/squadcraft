@@ -249,24 +249,6 @@ export async function approveUserProfile(profileId, selectedRole = "user") {
 
   console.log("Approving pending profile.", { clickedProfileId: targetProfileId, selectedRole });
 
-  const { data: pendingProfile, error: fetchError } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", targetProfileId)
-    .maybeSingle();
-
-  if (fetchError) {
-    console.error("Failed to fetch pending profile before approval.", fetchError);
-    return { ok: false, message: approvalQueryErrorMessage(fetchError, "Could not approve user.") };
-  }
-
-  console.log("Fetched pending profile before approval.", { fetchedProfileId: pendingProfile?.id, selectedRole });
-
-  if (!pendingProfile) return { ok: false, message: "No matching profile found." };
-  if (pendingProfile.approval_status !== "pending") {
-    return { ok: false, message: "This user is no longer pending approval." };
-  }
-
   const now = new Date().toISOString();
   const approvalPatch = {
     approval_status: "approved",
@@ -279,10 +261,10 @@ export async function approveUserProfile(profileId, selectedRole = "user") {
   const updateResult = await supabase
     .from("profiles")
     .update(approvalPatch)
-    .eq("id", targetProfileId);
+    .eq("id", targetProfileId)
+    .eq("approval_status", "pending");
   console.log("Pending profile approval update result.", {
     clickedProfileId: targetProfileId,
-    fetchedProfileId: pendingProfile.id,
     selectedRole,
     data: updateResult.data,
     error: updateResult.error,
@@ -291,11 +273,11 @@ export async function approveUserProfile(profileId, selectedRole = "user") {
 
   if (updateResult.error) {
     console.error("Failed to approve pending profile.", updateResult.error);
-    return { ok: false, message: approvalQueryErrorMessage(updateResult.error, "Could not approve user.") };
+    return { ok: false, message: updateResult.error.message || "Could not approve user." };
   }
 
   await loadPendingProfiles();
-  return { ok: true, profile: { ...pendingProfile, ...approvalPatch } };
+  return { ok: true, profile: { id: targetProfileId, ...approvalPatch } };
 }
 
 export async function updateUserRole(profileId, newRole) {
