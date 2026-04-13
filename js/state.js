@@ -494,7 +494,7 @@ export function normalizePlayerRecord(player = {}) {
   const positions = normalizePlayerPositions(player);
   const now = new Date().toISOString();
   const fallbackOwner = player.ownerUserId || player.createdBy || DEFAULT_USERS[0].id;
-  const approvalStatus = player.approvalStatus === "pending" ? "pending" : "approved";
+  const approvalStatus = ["pending", "rejected"].includes(player.approvalStatus) ? player.approvalStatus : "approved";
   return {
     ...player,
     rating: normalizeStoredRating(player.rating),
@@ -508,8 +508,8 @@ export function normalizePlayerRecord(player = {}) {
     createdAt: player.createdAt || now,
     updatedBy: player.updatedBy || player.createdBy || fallbackOwner,
     updatedAt: player.updatedAt || player.createdAt || now,
-    approvedBy: approvalStatus === "approved" ? (player.approvedBy || DEFAULT_USERS[0].id) : "",
-    approvedAt: approvalStatus === "approved" ? (player.approvedAt || player.createdAt || now) : "",
+    approvedBy: approvalStatus !== "pending" ? (player.approvedBy || DEFAULT_USERS[0].id) : "",
+    approvedAt: approvalStatus !== "pending" ? (player.approvedAt || player.createdAt || now) : "",
     approvalStatus,
     stats: {
       ...createDefaultPlayerStats(),

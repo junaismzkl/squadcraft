@@ -2,6 +2,7 @@ import { els } from "./dom.js";
 import { approveUserProfile, authState, canApproveUsers, canManageRoles, isApprovedProfile, loadPendingProfiles, updateUserRole } from "./auth.js";
 import { generateLineupPositions } from "./formation.js";
 import { clearLiveTimer, renderLiveMatch } from "./liveMatch.js";
+import { approveSharedPlayer, loadSharedPlayersIntoState, rejectSharedPlayer, saveSharedPlayer } from "./playerStore.js";
 import {
   getMatchSettings,
   normalizeCaptains,
@@ -302,6 +303,7 @@ export function changeCurrentUser(userId) {
 export async function openUserManagement() {
   if (!canApproveUsers()) return;
   await loadPendingProfiles();
+  await loadSharedPlayersIntoState();
   isManagePlayersMode = true;
   switchTab("players");
   render();
@@ -361,6 +363,10 @@ export async function savePlayerFromForm(event) {
   } else {
     const player = createPlayer({ name, rating: els.playerRating.value, positions, image, isGuest });
     addPlayer(player);
+    const sharedResult = await saveSharedPlayer(player);
+    if (!sharedResult.ok && player.approvalStatus === "pending") {
+      alert("Player was saved only in this browser. Add the Supabase players table so admins can review it.");
+    }
     logActivity("player_created", "player", player.id, { name, approvalStatus: player.approvalStatus });
     if (player.approvalStatus === "pending") {
       addNotification({
@@ -483,7 +489,7 @@ export function deletePlayer(id) {
   render();
 }
 
-export function approvePlayer(id) {
+export async function approvePlayer(id) {
   if (!canApprovePlayer()) {
     alert("You do not have permission to approve players.");
     return;
@@ -492,21 +498,62 @@ export function approvePlayer(id) {
   if (!player) return;
   const currentUser = getCurrentUser();
   const now = new Date().toISOString();
+  const approvalPatch = {
+    approvalStatus: "approved",
+    approvedBy: currentUser.id,
+    approvedAt: now,
+    updatedBy: currentUser.id,
+    updatedAt: now
+  };
   setPlayers(
     state.data.players.map((item) =>
       item.id === id
         ? {
             ...item,
-            approvalStatus: "approved",
-            approvedBy: currentUser.id,
-            approvedAt: now,
-            updatedBy: currentUser.id,
-            updatedAt: now
+            ...approvalPatch
           }
         : item
     )
   );
+  const sharedResult = await approveSharedPlayer(id, approvalPatch);
+  if (!sharedResult.ok) alert(sharedResult.message || "Player approved locally, but Supabase approval failed.");
+  await loadSharedPlayersIntoState();
   logActivity("player_approved", "player", id, { name: player.name });
+  removeNotification(`player-approval-${id}`);
+  persist();
+  render();
+}
+
+export async function rejectPlayer(id) {
+  if (!canApprovePlayer()) {
+    alert("You do not have permission to reject players.");
+    return;
+  }
+  const player = state.data.players.find((item) => item.id === id);
+  if (!player) return;
+  const currentUser = getCurrentUser();
+  const now = new Date().toISOString();
+  const rejectionPatch = {
+    approvalStatus: "rejected",
+    approvedBy: currentUser.id,
+    approvedAt: now,
+    updatedBy: currentUser.id,
+    updatedAt: now
+  };
+  setPlayers(
+    state.data.players.map((item) =>
+      item.id === id
+        ? {
+            ...item,
+            ...rejectionPatch
+          }
+        : item
+    )
+  );
+  const sharedResult = await rejectSharedPlayer(id, rejectionPatch);
+  if (!sharedResult.ok) alert(sharedResult.message || "Player rejected locally, but Supabase rejection failed.");
+  await loadSharedPlayersIntoState();
+  logActivity("player_rejected", "player", id, { name: player.name });
   removeNotification(`player-approval-${id}`);
   persist();
   render();
@@ -892,7 +939,7 @@ function renderPendingApprovalSection(pendingPlayers) {
   section.className = "pending-approval-section";
   section.innerHTML = `
     <div class="history-section-header">
-      <h3>Pending Approvals</h3>
+      <h3>Pending Players</h3>
       <span class="pill">${pendingPlayers.length} pending</span>
     </div>
     <div class="pending-approval-grid"></div>
@@ -904,6 +951,7 @@ function renderPendingApprovalSection(pendingPlayers) {
     card.querySelector('[data-action="edit"]')?.addEventListener("click", () => editPlayer(player.id));
     card.querySelector('[data-action="delete"]')?.addEventListener("click", () => deletePlayer(player.id));
     card.querySelector('[data-action="approve"]')?.addEventListener("click", () => approvePlayer(player.id));
+    card.querySelector('[data-action="reject"]')?.addEventListener("click", () => rejectPlayer(player.id));
     grid.appendChild(card);
   });
 
@@ -1049,6 +1097,7 @@ export function cardActionMarkup(player, options) {
     }
     if (canApprovePlayer() && player.approvalStatus !== "approved") {
       actions.push('<button class="icon-button" type="button" data-action="approve">Approve</button>');
+      actions.push('<button class="icon-button delete" type="button" data-action="reject">Reject</button>');
     }
     if (canEditPlayer(player) && player.approvalStatus !== "approved") {
       actions.push('<button class="icon-button" type="button" data-action="edit">Edit</button>');

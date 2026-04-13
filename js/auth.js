@@ -271,13 +271,19 @@ export async function approveUserProfile(profileId, selectedRole = "user") {
     status: updateResult.status
   });
 
-  if (updateResult.error) {
+  const approvalSucceeded = !updateResult.error;
+  if (!approvalSucceeded) {
     console.error("Failed to approve pending profile.", updateResult.error);
     return { ok: false, message: updateResult.error.message || "Could not approve user." };
   }
 
   await loadPendingProfiles();
-  return { ok: true, profile: { id: targetProfileId, ...approvalPatch } };
+  return {
+    ok: true,
+    message: "User approved.",
+    profileId: targetProfileId,
+    status: updateResult.status
+  };
 }
 
 export async function updateUserRole(profileId, newRole) {
