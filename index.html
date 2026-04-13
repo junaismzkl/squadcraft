@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Local Football Match Manager</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="app-topbar">
+      <h1 class="app-title">
+        <span class="title-main">Squad</span><span class="title-accent">Craft</span>
+      </h1>
+      <div class="topbar-actions">
+        <label class="user-switcher">
+          <span>User</span>
+          <select id="current-user-select" aria-label="Current user"></select>
+        </label>
+        <button class="notification-button" id="notifications-toggle" type="button" aria-label="Notifications">
+          <div class="header-icon" aria-hidden="true">
+            <svg class="header-logo-mark" viewBox="0 0 64 64" focusable="false">
+              <path d="M32 4.5C16.8 4.5 4.5 16.8 4.5 32S16.8 59.5 32 59.5 59.5 47.2 59.5 32 47.2 4.5 32 4.5Zm0 5.2c3.9 0 7.6 1 10.7 2.8l-4.2 6.6-6.5 1.8-6.5-1.8-4.2-6.6c3.1-1.8 6.8-2.8 10.7-2.8ZM12 24.8c1-3.3 2.8-6.2 5.2-8.6l4.2 6.5-.3 6.2-5.4 3.7-6.1-2.1c.1-2 .6-3.9 1.4-5.7Zm10.1 24.7c-3.2-1.7-5.9-4.2-7.9-7.3l5.7-2.3 5.6 3.3 1.4 6.3-4.8 0Zm4.1-11.1-4.3-7.4.5-7.2 9.6-2.7 9.6 2.7.5 7.2-4.3 7.4H26.2Zm15.7 11.1-4.8 0 1.4-6.3 5.6-3.3 5.7 2.3c-2 3.1-4.7 5.6-7.9 7.3Zm6.4-16.9-5.4-3.7-.3-6.2 4.2-6.5c2.4 2.4 4.2 5.3 5.2 8.6.8 1.8 1.3 3.7 1.4 5.7l-6.1 2.1Z"/>
+            </svg>
+          </div>
+        </button>
+      </div>
+    </header>
+
+    <div class="notifications-panel hidden" id="notifications-panel">
+      <div class="notifications-card">
+        <div class="inline-heading">
+          <h3>Notifications</h3>
+          <span class="counter" id="notifications-count">0</span>
+        </div>
+        <div class="notifications-list" id="notifications-list"></div>
+      </div>
+    </div>
+
+    <main>
+      <div class="bg-football ball-1"></div>
+      <div class="bg-football ball-2"></div>
+      <div class="bg-football ball-3"></div>
+      <section class="panel active" id="home-panel">
+        <div class="home-screen">
+          <p class="eyebrow">Upcoming</p>
+          <h1>Next Match</h1>
+          <div id="home-feedback"></div>
+          <div id="home-upcoming-match"></div>
+        </div>
+      </section>
+
+      <section class="panel" id="players-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Squad</p>
+            <h2>Player Management</h2>
+          </div>
+          <span class="counter" id="player-count">0 players</span>
+        </div>
+
+        <div class="players-toolbar">
+          <button class="primary" id="show-player-form" type="button">+ Create New Player</button>
+        </div>
+
+        <form class="card form-grid hidden" id="player-form">
+          <input type="hidden" id="editing-player-id">
+          <label>Name <input id="player-name" type="text" placeholder="Player name" autocomplete="off" required></label>
+          <label>Rating <input id="player-rating" type="number" min="50" max="100" value="50" required></label>
+            <label>Primary Position
+              <select id="player-role">
+                <option>GK</option>
+                <option>CB</option>
+                <option>WB</option>
+                <option selected>CM</option>
+                <option>WF</option>
+                <option>CF</option>
+              </select>
+            </label>
+            <label>Secondary Position
+              <select id="player-position">
+                <option value="">Optional</option>
+                <option>GK</option>
+                <option>CB</option>
+                <option>WB</option>
+                <option>CM</option>
+                <option>WF</option>
+                <option>CF</option>
+              </select>
+            </label>
+            <label>Third Position
+              <select id="player-position-third">
+                <option value="">Optional</option>
+                <option>GK</option>
+                <option>CB</option>
+                <option>WB</option>
+                <option>CM</option>
+                <option>WF</option>
+                <option>CF</option>
+              </select>
+            </label>
+            <label>Photo <input id="player-image" type="file" accept="image/*"></label>
+            <label class="checkbox-row"><input id="player-guest" type="checkbox"> Guest player</label>
+          <div class="form-actions">
+            <button class="primary" type="submit">Add Player</button>
+            <button class="secondary" id="cancel-edit-player" type="button">Cancel</button>
+          </div>
+        </form>
+
+        <div class="player-card-grid" id="players-list" aria-live="polite"></div>
+      </section>
+
+      <section class="panel" id="match-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Setup</p>
+            <h2>Create Match</h2>
+          </div>
+        </div>
+
+        <div class="match-step-indicator" id="match-step-indicator" aria-label="Match setup progress">
+          <span class="match-step-pill" data-step-indicator="1">Time</span>
+          <span class="match-step-arrow" aria-hidden="true">&rarr;</span>
+          <span class="match-step-pill" data-step-indicator="2">Players</span>
+          <span class="match-step-arrow" aria-hidden="true">&rarr;</span>
+          <span class="match-step-pill" data-step-indicator="3">Lineup</span>
+        </div>
+
+        <section class="match-step-panel" id="match-step-landing">
+          <div class="match-create-action">
+            <button class="primary" id="create-new-match" type="button">Create New Match</button>
+          </div>
+          <section class="match-upcoming-section">
+            <div class="inline-heading">
+              <h3>Upcoming Matches</h3>
+            </div>
+            <div class="match-upcoming-list" id="match-upcoming-list"></div>
+          </section>
+        </section>
+
+        <section class="match-step-panel hidden" id="match-step-time">
+          <div class="card match-settings compact-settings">
+            <label>Match Date <input id="match-date" type="date"></label>
+            <label>
+              Start Time
+              <div class="time-select-row">
+                <select id="match-start-hour" aria-label="Start hour"></select>
+                <span class="time-separator">:</span>
+                <select id="match-start-minute" aria-label="Start minute"></select>
+                <select id="match-start-period" aria-label="Start period">
+                  <option value="AM">AM</option>
+                  <option value="PM">PM</option>
+                </select>
+              </div>
+            </label>
+            <label>
+              End Time
+              <div class="time-select-row">
+                <select id="match-end-hour" aria-label="End hour"></select>
+                <span class="time-separator">:</span>
+                <select id="match-end-minute" aria-label="End minute"></select>
+                <select id="match-end-period" aria-label="End period">
+                  <option value="AM">AM</option>
+                  <option value="PM">PM</option>
+                </select>
+              </div>
+              <div class="time-quick-actions">
+                <button class="ghost compact-button" id="match-end-plus-30" type="button">+30 min</button>
+                <button class="ghost compact-button" id="match-end-plus-60" type="button">+1 hour</button>
+              </div>
+            </label>
+          </div>
+          <div class="form-actions match-step-actions">
+            <button class="ghost" id="match-back-to-landing" type="button">Back</button>
+            <button class="ghost danger" data-cancel-match type="button">Cancel</button>
+            <button class="primary" id="match-next-to-players" type="button">Next</button>
+          </div>
+        </section>
+
+        <section class="match-step-panel hidden" id="match-step-players">
+          <button class="secondary guest-toggle" id="guest-toggle" type="button" aria-expanded="false" aria-controls="quick-guest-form">Add Guest Player</button>
+
+          <form class="card form-grid guest-form-panel" id="quick-guest-form" aria-hidden="true">
+            <label>Guest name <input id="guest-name" type="text" placeholder="Add a guest for this match" autocomplete="off"></label>
+            <label>Rating <input id="guest-rating" type="number" min="50" max="100" value="50"></label>
+              <label>Primary Position
+                <select id="guest-role">
+                  <option>GK</option>
+                  <option>CB</option>
+                  <option>WB</option>
+                  <option selected>CM</option>
+                  <option>WF</option>
+                  <option>CF</option>
+                </select>
+              </label>
+              <label>Secondary Position
+                <select id="guest-position">
+                  <option value="">Optional</option>
+                  <option>GK</option>
+                  <option>CB</option>
+                  <option>WB</option>
+                  <option>CM</option>
+                  <option>WF</option>
+                  <option>CF</option>
+                </select>
+              </label>
+              <label>Third Position
+                <select id="guest-position-third">
+                  <option value="">Optional</option>
+                  <option>GK</option>
+                  <option>CB</option>
+                  <option>WB</option>
+                  <option>CM</option>
+                  <option>WF</option>
+                  <option>CF</option>
+                </select>
+              </label>
+              <label>Photo <input id="guest-image" type="file" accept="image/*"></label>
+            <div class="form-actions"><button class="secondary" type="submit">Add Guest</button></div>
+          </form>
+
+          <div class="card">
+            <div class="inline-heading">
+              <h3>Select Players</h3>
+              <button class="ghost" id="select-all-players" type="button">Select All</button>
+            </div>
+            <div class="selection-list" id="match-player-list"></div>
+            <div class="form-actions match-step-actions">
+              <button class="ghost" id="match-back-to-time" type="button">Back</button>
+              <button class="ghost danger" data-cancel-match type="button">Cancel</button>
+              <button class="primary" id="generate-teams" type="button">Generate Teams</button>
+              <button class="secondary" id="reshuffle-teams" type="button" disabled>Reshuffle</button>
+            </div>
+            <p class="helper" id="team-balance-note">Select at least two players to generate teams.</p>
+
+            <div class="match-finished-modal hidden" id="forced-generation-modal" role="dialog" aria-modal="true" aria-labelledby="forced-generation-title">
+              <div class="match-finished-modal-card">
+                <p class="eyebrow">Lineup Warning</p>
+                <h3 id="forced-generation-title">Exact lineup not possible</h3>
+                <p class="image-preview-copy" id="forced-generation-message">
+                  No supported formation can be filled using only primary or secondary exact positions. You can still create teams using best possible placement. Some players may be assigned out of position.
+                </p>
+                <div class="form-actions">
+                  <button class="primary" id="forced-generation-continue" type="button">Continue Anyway</button>
+                  <button class="ghost" id="forced-generation-cancel" type="button">Cancel</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="match-step-panel hidden" id="match-step-lineup">
+          <div class="form-actions match-step-actions">
+            <button class="ghost" id="match-back-to-selection" type="button">Back</button>
+            <button class="ghost danger hidden" id="cancel-match" data-cancel-match type="button">Cancel</button>
+          </div>
+          <div class="teams-grid" id="teams-area"></div>
+          <button class="primary full-width hidden" id="create-match" type="button">Create Match</button>
+
+          <div class="match-finished-modal hidden" id="match-finished-modal" role="dialog" aria-modal="true" aria-labelledby="match-finished-title">
+            <div class="match-finished-modal-card">
+              <p class="eyebrow">Match Status</p>
+              <h3 id="match-finished-title">Match Finished</h3>
+              <button class="primary full-width" id="enter-result" type="button">Enter Result</button>
+            </div>
+          </div>
+
+          <form class="card result-panel hidden" id="result-form">
+            <div class="inline-heading">
+              <h3>Match Result</h3>
+              <span id="score-total-label" class="counter">0 total goals</span>
+            </div>
+            <label class="checkbox-row result-auto-score"><input id="auto-score" type="checkbox" checked> Auto-update score from scorers</label>
+            <div class="score-grid">
+              <label>Team A score <input id="team-a-score" type="number" min="0" value="0"></label>
+              <label>Team B score <input id="team-b-score" type="number" min="0" value="0"></label>
+            </div>
+            <div class="result-scorers-grid">
+              <section class="scorer-card">
+                <div class="inline-heading">
+                  <h4>Team A scorers</h4>
+                  <button class="secondary compact-button" id="add-team-a-scorer" type="button">+ Add scorer</button>
+                </div>
+                <p class="scorer-remaining" id="team-a-scorers-remaining">Remaining goals: 0</p>
+                <div class="scorer-list" id="team-a-scorers"></div>
+              </section>
+              <section class="scorer-card">
+                <div class="inline-heading">
+                  <h4>Team B scorers</h4>
+                  <button class="secondary compact-button" id="add-team-b-scorer" type="button">+ Add scorer</button>
+                </div>
+                <p class="scorer-remaining" id="team-b-scorers-remaining">Remaining goals: 0</p>
+                <div class="scorer-list" id="team-b-scorers"></div>
+              </section>
+            </div>
+            <label class="motm-field">Man of the Match <select id="motm-select"></select></label>
+            <button class="primary full-width" type="submit">Save Match</button>
+          </form>
+        </section>
+      </section>
+
+        <section class="panel" id="stats-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Leaderboard</p>
+              <h2>Statistics</h2>
+            </div>
+          </div>
+          <div class="stats-tabs" id="stats-tabs" role="tablist" aria-label="Statistics categories">
+            <button class="stats-tab active" type="button" data-stats-tab="goals" role="tab" aria-selected="true">Goals</button>
+            <button class="stats-tab" type="button" data-stats-tab="wins" role="tab" aria-selected="false">Wins</button>
+            <button class="stats-tab" type="button" data-stats-tab="draws" role="tab" aria-selected="false">Draws</button>
+            <button class="stats-tab" type="button" data-stats-tab="losses" role="tab" aria-selected="false">Losses</button>
+            <button class="stats-tab" type="button" data-stats-tab="motm" role="tab" aria-selected="false">MVP</button>
+          </div>
+          <div class="leaderboard leaderboard-list" id="leaderboard"></div>
+        </section>
+
+      <section class="panel" id="history-panel">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Archive</p>
+            <h2>Match History</h2>
+          </div>
+        </div>
+        <div class="list" id="history-list"></div>
+      </section>
+    </main>
+  </div>
+
+  <footer class="app-footer">
+    <nav class="tabs" aria-label="App sections">
+      <button class="tab-button active" data-tab="home">Home</button>
+      <button class="tab-button" data-tab="players">Players</button>
+      <button class="tab-button" data-tab="match">Match</button>
+      <button class="tab-button" data-tab="stats">Stats</button>
+      <button class="tab-button" data-tab="history">History</button>
+    </nav>
+    <p class="footer-credit">Crafted by <span class="dev-name">Junais</span></p>
+  </footer>
+
+  <template id="empty-state-template">
+    <div class="empty-state">
+      <strong>No items yet</strong>
+      <p>Once you add data, it will appear here.</p>
+    </div>
+  </template>
+
+  <div class="match-finished-modal hidden" id="image-preview-modal" role="dialog" aria-modal="true" aria-labelledby="image-preview-title">
+    <div class="match-finished-modal-card image-preview-modal-card">
+      <p class="eyebrow">Player Photo</p>
+      <h3 id="image-preview-title">Preview Image</h3>
+      <p class="image-preview-copy">Check the circular preview before saving this photo.</p>
+      <div class="image-preview-frame" id="image-preview-frame">
+        <img id="image-preview-photo" alt="Selected player preview" draggable="false">
+      </div>
+      <label class="image-preview-zoom-control">
+        <span>Zoom</span>
+        <input id="image-preview-zoom" type="range" min="1" max="3" step="0.01" value="1">
+      </label>
+      <input id="image-preview-reupload" type="file" accept="image/*" class="hidden">
+      <div class="form-actions image-preview-actions">
+        <button class="ghost" id="image-preview-change" type="button">Re-upload</button>
+        <button class="secondary" id="image-preview-cancel" type="button">Cancel</button>
+        <button class="primary" id="image-preview-save" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

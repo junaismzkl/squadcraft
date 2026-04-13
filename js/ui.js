@@ -1,0 +1,2535 @@
+import { els } from "./dom.js";
+import { generateLineupPositions } from "./formation.js";
+import { clearLiveTimer, renderLiveMatch } from "./liveMatch.js";
+import {
+  getMatchSettings,
+  normalizeCaptains,
+  normalizeTeamFormations,
+  resetAppData,
+  setCaptain,
+  updateFormationOptions,
+  validateSelectedPlayersForMatch
+} from "./match.js";
+import {
+  appendPitchPlayers,
+  createPitchCard,
+  renderCompletedMatchSummary,
+  renderFormationSelectors,
+  renderPitchSurface,
+  renderTeamHeaders
+} from "./pitchRenderer.js";
+import {
+  openResultPanel,
+  markCurrentMatchPendingResult,
+  renderMotmOptions,
+  renderResultSection
+} from "./result.js";
+import {
+  addPlayer,
+  addNotification,
+  addSelectedPlayerId,
+  addMatchGuestPlayer,
+  canApprovePlayer,
+  canDeleteMatch,
+  canDeletePlayer,
+  canEditMatch,
+  canEditPlayer,
+  canManagePlayers,
+  canRatePlayer,
+  clearTeams,
+  clearMatchGuestPlayers,
+  clearSelectedPlayerIds,
+  createDefaultPlayerStats,
+  DEFAULT_AVATAR,
+  filterSelectedPlayerIds,
+  getNotifications,
+  getPlayerPositions,
+  getPrimaryPosition,
+  getMatchStatus,
+  getMatchResult,
+  getLiveMatch,
+  getCurrentUser,
+  getUserName,
+  hasPermission,
+  isPendingResultMatch,
+  isGoalkeeperPlayer,
+  isCompletedMatch,
+  isLiveMatch,
+  isUpcomingMatch,
+  managerHistoryTeam,
+  matchDateTime,
+  matchEndTime,
+  matchStartTimeValue,
+  matchStartTime,
+  matchResultText,
+  motmName,
+  markNotificationsReadForMatch,
+  persist,
+  logActivity,
+  removeMatch,
+  removeMatchGuestPlayer,
+  removeNotification,
+  removePlayer,
+  removeSelectedPlayerId,
+  restoreUpcomingMatch,
+  roles,
+  scorersText,
+  serializeCurrentMatch,
+  setMatches,
+  setPlayers,
+  setCurrentUser,
+  persistCurrentMatch,
+  syncNotificationsWithMatches,
+  state,
+  updateTeams
+} from "./state.js";
+import { balanceLabel, goalkeeperNote, regenerateTeamLineup, teamRating } from "./teamGenerator.js";
+import { clampRating, escapeHtml, formatDate, readFileAsDataUrl, resizeImageDataUrl } from "./utils.js";
+
+let matchStatusRefreshId = null;
+let matchWizardStep = 0;
+let homeFeedbackMessage = "";
+let showAllHomeUpcomingMatches = false;
+let isPlayerFormVisible = false;
+let isEditingMatch = false;
+let isManagePlayersMode = false;
+let editActionMode = null;
+let activeEditSelection = null;
+let editActionMessage = "";
+let activeStatsTab = "goals";
+let editingMatchSnapshot = null;
+let hasPendingMatchEdits = false;
+let notificationsOpen = false;
+const imageDrafts = {
+  player: "",
+  guest: ""
+};
+const imagePreviewState = {
+  target: "",
+  pending: "",
+  source: "",
+  zoom: 1,
+  offsetX: 0,
+  offsetY: 0,
+  baseWidth: 0,
+  baseHeight: 0,
+  naturalWidth: 0,
+  naturalHeight: 0,
+  frameSize: 0,
+  dragPointerId: null,
+  dragStartX: 0,
+  dragStartY: 0,
+  dragOriginX: 0,
+  dragOriginY: 0
+};
+
+export function render() {
+  if (!state.isReady) return;
+  try {
+    filterSelectedPlayerIds((id) => state.data.players.some((player) => player.id === id && player.approvalStatus === "approved"));
+    renderCurrentUserSwitcher();
+    renderHome();
+    renderPlayers();
+    renderMatchSection();
+    renderStats();
+    renderHistory();
+    renderNotifications();
+  } catch (error) {
+    console.error("Failed to render app UI.", error);
+  }
+}
+
+export function clearManualSwapSelection() {
+  clearEditActionMode();
+}
+
+export function renderHome() {
+  els.homeUpcomingMatch.innerHTML = "";
+  renderHomeFeedback();
+  const liveMatch = getLiveMatch();
+  const upcomingMatches = getHomeUpcomingMatches();
+
+  if (!liveMatch && !upcomingMatches.length) {
+    els.homeUpcomingMatch.appendChild(emptyState("No upcoming matches", "Create a match to see it here."));
+    return;
+  }
+
+  if (liveMatch) {
+    const card = document.createElement("article");
+    card.className = "home-match-card";
+    card.innerHTML = `
+      <div>
+        <p class="eyebrow">Live now</p>
+        <h2>${escapeHtml(liveMatch.teamAName || "Team A")} vs ${escapeHtml(liveMatch.teamBName || "Team B")}</h2>
+        <p>${formatReadableMatchWindow(liveMatch)}</p>
+      </div>
+      <button class="primary" type="button">Open Live Match</button>
+    `;
+    card.querySelector("button").addEventListener("click", () => {
+      restoreUpcomingMatch(liveMatch);
+      switchTab("match");
+      render();
+    });
+    els.homeUpcomingMatch.appendChild(card);
+  }
+
+  if (!upcomingMatches.length) return;
+
+  const section = document.createElement("section");
+  section.className = "match-upcoming-section";
+  section.innerHTML = `
+    <div class="history-section-header">
+      <h3>Upcoming Matches</h3>
+      ${upcomingMatches.length > 3 && !showAllHomeUpcomingMatches ? '<button class="secondary compact-button" type="button">View All</button>' : ""}
+    </div>
+    <div class="match-upcoming-list"></div>
+  `;
+
+  if (upcomingMatches.length > 3 && !showAllHomeUpcomingMatches) {
+    section.querySelector("button").addEventListener("click", () => {
+      showAllHomeUpcomingMatches = true;
+      renderHome();
+    });
+  }
+
+  const list = section.querySelector(".match-upcoming-list");
+  const visibleMatches = showAllHomeUpcomingMatches ? upcomingMatches : upcomingMatches.slice(0, 3);
+  visibleMatches.forEach((match, index) => {
+    const card = createUpcomingMatchCard(match, {
+      isNextMatch: index === 0,
+      onView: () => {
+        openMatchInViewMode(match, { switchTab: true });
+      }
+    });
+    list.appendChild(card);
+  });
+
+  els.homeUpcomingMatch.appendChild(section);
+}
+
+export function switchTab(tabName) {
+  if (tabName === "match" && !state.currentTeams) {
+    resetMatchSetupState();
+  }
+  els.tabs.forEach((button) => button.classList.toggle("active", button.dataset.tab === tabName));
+  els.panels.forEach((panel) => panel.classList.toggle("active", panel.id === `${tabName}-panel`));
+}
+
+function renderCurrentUserSwitcher() {
+  if (!els.currentUserSelect) return;
+  const currentValue = els.currentUserSelect.value;
+  const nextMarkup = state.data.users
+    .filter((user) => user.isActive)
+    .map((user) => `<option value="${escapeHtml(user.id)}">${escapeHtml(user.name)} - ${escapeHtml(formatRoleLabel(user.role))}</option>`)
+    .join("");
+  if (els.currentUserSelect.innerHTML !== nextMarkup) {
+    els.currentUserSelect.innerHTML = nextMarkup;
+  }
+  els.currentUserSelect.value = state.data.currentUserId || currentValue;
+}
+
+export function changeCurrentUser(userId) {
+  setCurrentUser(userId);
+  isManagePlayersMode = false;
+  resetPlayerForm();
+  clearManualSwapSelection();
+  render();
+}
+
+export async function savePlayerFromForm(event) {
+  event.preventDefault();
+  const name = els.playerName.value.trim();
+  const positions = getSelectedFormPositions(
+    els.playerRole.value,
+    els.playerPosition.value,
+    els.playerPositionThird.value
+  );
+  const isGuest = els.playerGuest.checked;
+  const editingId = els.editingPlayerId.value;
+  if (!name) return;
+  const existingPlayer = state.data.players.find((item) => item.id === editingId);
+  const image = imageDrafts.player || existingPlayer?.image || "";
+  const currentUser = getCurrentUser();
+  const now = new Date().toISOString();
+
+  if (editingId) {
+    if (!existingPlayer || !canEditPlayer(existingPlayer, currentUser)) {
+      alert("You can only edit your own player card.");
+      return;
+    }
+
+    const nextRating = canRatePlayer(existingPlayer, currentUser)
+      ? clampRating(els.playerRating.value)
+      : clampRating(existingPlayer.rating);
+    setPlayers(
+      state.data.players.map((player) =>
+        player.id === editingId
+          ? {
+              ...player,
+              name,
+              rating: nextRating,
+              positions,
+              role: positions.primary,
+              position: positions.secondary || "",
+              image,
+              isGuest,
+              updatedBy: currentUser.id,
+              updatedAt: now,
+              approvalStatus: player.approvalStatus === "approved" && canApprovePlayer(currentUser) ? "approved" : player.approvalStatus
+            }
+          : player
+      )
+    );
+    logActivity("player_edited", "player", editingId, { name });
+    if (nextRating !== clampRating(existingPlayer.rating)) {
+      logActivity("player_rating_changed", "player", editingId, {
+        from: clampRating(existingPlayer.rating),
+        to: nextRating
+      });
+    }
+  } else {
+    const player = createPlayer({ name, rating: els.playerRating.value, positions, image, isGuest });
+    addPlayer(player);
+    logActivity("player_created", "player", player.id, { name, approvalStatus: player.approvalStatus });
+    if (player.approvalStatus === "pending") {
+      addNotification({
+        id: `player-approval-${player.id}`,
+        playerId: player.id,
+        userId: currentUser.id,
+        type: "player_approval_pending",
+        message: "Your player is waiting for admin approval",
+        read: false,
+        createdAt: now
+      });
+    }
+  }
+
+  persist();
+  resetPlayerForm();
+  render();
+}
+
+export function showPlayerForm() {
+  isPlayerFormVisible = true;
+  syncPlayerFormVisibility();
+  els.playerRating.disabled = false;
+  els.playerName.focus();
+}
+
+export function createPlayer({ name, rating, positions, image = "", isGuest }) {
+  const normalizedPositions = getSelectedFormPositions(
+    positions?.primary,
+    positions?.secondary,
+    positions?.tertiary
+  );
+  const currentUser = getCurrentUser();
+  const now = new Date().toISOString();
+  const canModerate = canApprovePlayer(currentUser);
+  const playerId = window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : `player-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return {
+    id: playerId,
+    name,
+    rating: canModerate || isGuest ? clampRating(rating) : 50,
+    positions: normalizedPositions,
+    role: normalizedPositions.primary,
+    position: normalizedPositions.secondary || "",
+    image,
+    isGuest,
+    ownerUserId: isGuest ? "" : currentUser.id,
+    createdBy: currentUser.id,
+    createdAt: now,
+    updatedBy: currentUser.id,
+    updatedAt: now,
+    approvedBy: canModerate ? currentUser.id : "",
+    approvedAt: canModerate ? now : "",
+    approvalStatus: canModerate || isGuest ? "approved" : "pending",
+    stats: createDefaultPlayerStats()
+  };
+}
+
+export function resetPlayerForm() {
+  els.editingPlayerId.value = "";
+  els.playerForm.querySelector(".primary").textContent = "Add Player";
+  els.playerName.value = "";
+  els.playerRating.value = "50";
+  els.playerRating.disabled = false;
+  els.playerRole.value = "CM";
+  els.playerPosition.value = "";
+  els.playerPositionThird.value = "";
+  els.playerImage.value = "";
+  imageDrafts.player = "";
+  els.playerGuest.checked = false;
+  isPlayerFormVisible = false;
+  syncPlayerFormVisibility();
+}
+
+export function editPlayer(id) {
+  const player = state.data.players.find((item) => item.id === id);
+  if (!player) return;
+  if (!canEditPlayer(player)) {
+    alert("You can only edit your own player card.");
+    return;
+  }
+  isPlayerFormVisible = true;
+  els.editingPlayerId.value = player.id;
+  els.playerName.value = player.name;
+  els.playerRating.value = clampRating(player.rating);
+  els.playerRating.disabled = !canRatePlayer(player);
+  els.playerRole.value = getPrimaryPosition(player);
+  els.playerPosition.value = player.positions?.secondary || player.position || "";
+  els.playerPositionThird.value = player.positions?.tertiary || "";
+  els.playerImage.value = "";
+  els.playerGuest.checked = player.isGuest;
+  els.playerForm.querySelector(".primary").textContent = "Save Player";
+  syncPlayerFormVisibility();
+  switchTab("players");
+  els.playerName.focus();
+}
+
+export function openMatchInViewMode(match, options = {}) {
+  restoreUpcomingMatch(match);
+  isEditingMatch = false;
+  editingMatchSnapshot = null;
+  hasPendingMatchEdits = false;
+  matchWizardStep = 3;
+  if (options.switchTab) switchTab("match");
+  render();
+}
+
+export function deletePlayer(id) {
+  const player = state.data.players.find((item) => item.id === id);
+  if (!player) return;
+  if (!canDeletePlayer(player)) {
+    alert("You do not have permission to delete this player.");
+    return;
+  }
+  if (!confirm(`Delete ${player.name}? Match history will stay saved, but future stats will not include this player.`)) return;
+  removePlayer(id);
+  removeSelectedPlayerId(id);
+  clearTeams();
+  logActivity("player_deleted", "player", id, { name: player.name });
+  persist();
+  render();
+}
+
+export function approvePlayer(id) {
+  if (!canApprovePlayer()) {
+    alert("You do not have permission to approve players.");
+    return;
+  }
+  const player = state.data.players.find((item) => item.id === id);
+  if (!player) return;
+  const currentUser = getCurrentUser();
+  const now = new Date().toISOString();
+  setPlayers(
+    state.data.players.map((item) =>
+      item.id === id
+        ? {
+            ...item,
+            approvalStatus: "approved",
+            approvedBy: currentUser.id,
+            approvedAt: now,
+            updatedBy: currentUser.id,
+            updatedAt: now
+          }
+        : item
+    )
+  );
+  logActivity("player_approved", "player", id, { name: player.name });
+  removeNotification(`player-approval-${id}`);
+  persist();
+  render();
+}
+
+export async function addQuickGuest(event) {
+  event.preventDefault();
+  const name = els.guestName.value.trim();
+  if (!name) return;
+  const image = imageDrafts.guest || "";
+
+  const player = createPlayer({
+      name,
+      rating: clampRating(els.guestRating.value),
+      positions: getSelectedFormPositions(
+        els.guestRole.value,
+        els.guestPosition.value,
+        els.guestPositionThird.value
+      ),
+      image,
+      isGuest: true
+    });
+
+  addMatchGuestPlayer(player);
+  clearTeams();
+  els.guestName.value = "";
+  els.guestRating.value = "50";
+    els.guestRole.value = "CM";
+    els.guestPosition.value = "";
+    els.guestPositionThird.value = "";
+  els.guestImage.value = "";
+  imageDrafts.guest = "";
+  renderMatchSection();
+  closeGuestForm();
+}
+
+export async function handleImageUploadChange(target) {
+  const input = target === "guest" ? els.guestImage : els.playerImage;
+  const file = input?.files?.[0];
+  if (!file) return;
+
+  const dataUrl = await readFileAsDataUrl(file);
+  const resizedImage = await resizeImageDataUrl(dataUrl);
+  if (!resizedImage) {
+    alert("That image could not be read. Please try another photo.");
+    input.value = "";
+    return;
+  }
+
+  await openImagePreview(target, resizedImage);
+}
+
+export function handleImagePreviewCancel() {
+  const input = imagePreviewState.target === "guest" ? els.guestImage : els.playerImage;
+  if (input) input.value = "";
+  resetImagePreviewState();
+}
+
+export function handleImagePreviewSave() {
+  if (!imagePreviewState.target || !imagePreviewState.source) {
+    handleImagePreviewCancel();
+    return;
+  }
+
+  imageDrafts[imagePreviewState.target] = exportPreviewImage();
+  resetImagePreviewState(false);
+}
+
+export function handleImagePreviewReupload(event) {
+  if (event?.type === "click") {
+    els.imagePreviewReupload.click();
+    return;
+  }
+
+  const file = event?.target?.files?.[0];
+  if (!file) return;
+
+  readFileAsDataUrl(file)
+    .then((dataUrl) => resizeImageDataUrl(dataUrl))
+    .then(async (resizedImage) => {
+      if (!resizedImage) {
+        alert("That image could not be read. Please try another photo.");
+        return;
+      }
+      await openImagePreview(imagePreviewState.target, resizedImage);
+    });
+}
+
+export function handleImagePreviewZoom() {
+  imagePreviewState.zoom = Number(els.imagePreviewZoom.value) || 1;
+  console.log("Image preview zoom:", imagePreviewState.zoom);
+  clampImagePreviewOffset();
+  applyImagePreviewTransform();
+}
+
+export function handleImagePreviewPointerDown(event) {
+  if (!imagePreviewState.source) return;
+  event.preventDefault();
+  imagePreviewState.dragPointerId = event.pointerId;
+  imagePreviewState.dragStartX = event.clientX;
+  imagePreviewState.dragStartY = event.clientY;
+  imagePreviewState.dragOriginX = imagePreviewState.offsetX;
+  imagePreviewState.dragOriginY = imagePreviewState.offsetY;
+  els.imagePreviewFrame.setPointerCapture?.(event.pointerId);
+  window.addEventListener("pointermove", handleImagePreviewPointerMove);
+  window.addEventListener("pointerup", handleImagePreviewPointerUp);
+  window.addEventListener("pointercancel", handleImagePreviewPointerUp);
+}
+
+async function openImagePreview(target, resizedImage) {
+  const dimensions = await loadImageDimensions(resizedImage);
+  if (!dimensions) {
+    alert("That image could not be read. Please try another photo.");
+    return;
+  }
+
+  const frameSize = getImagePreviewFrameSize();
+  const coverScale = Math.max(frameSize / dimensions.width, frameSize / dimensions.height);
+  imagePreviewState.target = target;
+  imagePreviewState.pending = resizedImage;
+  imagePreviewState.source = resizedImage;
+  imagePreviewState.zoom = 1;
+  imagePreviewState.offsetX = 0;
+  imagePreviewState.offsetY = 0;
+  imagePreviewState.baseWidth = dimensions.width * coverScale;
+  imagePreviewState.baseHeight = dimensions.height * coverScale;
+  imagePreviewState.naturalWidth = dimensions.width;
+  imagePreviewState.naturalHeight = dimensions.height;
+  imagePreviewState.frameSize = frameSize;
+  bindImagePreviewModalEvents();
+  els.imagePreviewZoom.value = "1";
+  els.imagePreviewPhoto.src = resizedImage;
+  els.imagePreviewModal.classList.remove("hidden");
+  imagePreviewState.frameSize = getImagePreviewFrameSize();
+  const adjustedCoverScale = Math.max(imagePreviewState.frameSize / dimensions.width, imagePreviewState.frameSize / dimensions.height);
+  imagePreviewState.baseWidth = dimensions.width * adjustedCoverScale;
+  imagePreviewState.baseHeight = dimensions.height * adjustedCoverScale;
+  applyImagePreviewTransform();
+}
+
+function bindImagePreviewModalEvents() {
+  const modal = document.querySelector("#image-preview-modal");
+  const frame = document.querySelector("#image-preview-frame");
+  const photo = document.querySelector("#image-preview-photo");
+  const zoom = document.querySelector("#image-preview-zoom");
+  const change = document.querySelector("#image-preview-change");
+  const cancel = document.querySelector("#image-preview-cancel");
+  const save = document.querySelector("#image-preview-save");
+  const reupload = document.querySelector("#image-preview-reupload");
+
+  if (!modal || !frame || !photo || !zoom || !change || !cancel || !save || !reupload) return;
+
+  els.imagePreviewModal = modal;
+  els.imagePreviewFrame = frame;
+  els.imagePreviewPhoto = photo;
+  els.imagePreviewZoom = zoom;
+  els.imagePreviewChange = change;
+  els.imagePreviewCancel = cancel;
+  els.imagePreviewSave = save;
+  els.imagePreviewReupload = reupload;
+
+  zoom.oninput = handleImagePreviewZoom;
+  frame.onpointerdown = handleImagePreviewPointerDown;
+  change.onclick = handleImagePreviewReupload;
+  cancel.onclick = handleImagePreviewCancel;
+  save.onclick = handleImagePreviewSave;
+  reupload.onchange = handleImagePreviewReupload;
+}
+
+function handleImagePreviewPointerMove(event) {
+  if (imagePreviewState.dragPointerId !== event.pointerId) return;
+  imagePreviewState.offsetX = imagePreviewState.dragOriginX + (event.clientX - imagePreviewState.dragStartX);
+  imagePreviewState.offsetY = imagePreviewState.dragOriginY + (event.clientY - imagePreviewState.dragStartY);
+  clampImagePreviewOffset();
+  applyImagePreviewTransform();
+}
+
+function handleImagePreviewPointerUp(event) {
+  if (imagePreviewState.dragPointerId !== event.pointerId) return;
+  els.imagePreviewFrame.releasePointerCapture?.(event.pointerId);
+  imagePreviewState.dragPointerId = null;
+  window.removeEventListener("pointermove", handleImagePreviewPointerMove);
+  window.removeEventListener("pointerup", handleImagePreviewPointerUp);
+  window.removeEventListener("pointercancel", handleImagePreviewPointerUp);
+}
+
+function applyImagePreviewTransform() {
+  const width = imagePreviewState.baseWidth;
+  const height = imagePreviewState.baseHeight;
+  const transform = `translate(calc(-50% + ${imagePreviewState.offsetX}px), calc(-50% + ${imagePreviewState.offsetY}px)) scale(${imagePreviewState.zoom})`;
+  els.imagePreviewPhoto.style.width = `${width}px`;
+  els.imagePreviewPhoto.style.height = `${height}px`;
+  els.imagePreviewPhoto.style.transform = transform;
+  console.log("Image preview transform:", transform);
+}
+
+function clampImagePreviewOffset() {
+  const width = imagePreviewState.baseWidth * imagePreviewState.zoom;
+  const height = imagePreviewState.baseHeight * imagePreviewState.zoom;
+  const maxOffsetX = Math.max(0, (width - imagePreviewState.frameSize) / 2);
+  const maxOffsetY = Math.max(0, (height - imagePreviewState.frameSize) / 2);
+  imagePreviewState.offsetX = Math.min(maxOffsetX, Math.max(-maxOffsetX, imagePreviewState.offsetX));
+  imagePreviewState.offsetY = Math.min(maxOffsetY, Math.max(-maxOffsetY, imagePreviewState.offsetY));
+}
+
+function exportPreviewImage() {
+  const outputSize = 320;
+  const canvas = document.createElement("canvas");
+  canvas.width = outputSize;
+  canvas.height = outputSize;
+  const context = canvas.getContext("2d");
+  if (!context || !imagePreviewState.source || !els.imagePreviewPhoto.complete) return imagePreviewState.pending || "";
+
+  const scaleX = outputSize / imagePreviewState.frameSize;
+  const drawWidth = imagePreviewState.baseWidth * imagePreviewState.zoom * scaleX;
+  const drawHeight = imagePreviewState.baseHeight * imagePreviewState.zoom * scaleX;
+  const drawX = (outputSize - drawWidth) / 2 + imagePreviewState.offsetX * scaleX;
+  const drawY = (outputSize - drawHeight) / 2 + imagePreviewState.offsetY * scaleX;
+
+  context.beginPath();
+  context.arc(outputSize / 2, outputSize / 2, outputSize / 2, 0, Math.PI * 2);
+  context.closePath();
+  context.clip();
+  context.drawImage(els.imagePreviewPhoto, drawX, drawY, drawWidth, drawHeight);
+  return canvas.toDataURL("image/jpeg", 0.88);
+}
+
+function resetImagePreviewState(clearInput = true) {
+  if (clearInput) {
+    const input = imagePreviewState.target === "guest" ? els.guestImage : els.playerImage;
+    if (input) input.value = "";
+  }
+  if (imagePreviewState.dragPointerId !== null) {
+    window.removeEventListener("pointermove", handleImagePreviewPointerMove);
+    window.removeEventListener("pointerup", handleImagePreviewPointerUp);
+    window.removeEventListener("pointercancel", handleImagePreviewPointerUp);
+  }
+  imagePreviewState.target = "";
+  imagePreviewState.pending = "";
+  imagePreviewState.source = "";
+  imagePreviewState.zoom = 1;
+  imagePreviewState.offsetX = 0;
+  imagePreviewState.offsetY = 0;
+  imagePreviewState.baseWidth = 0;
+  imagePreviewState.baseHeight = 0;
+  imagePreviewState.naturalWidth = 0;
+  imagePreviewState.naturalHeight = 0;
+  imagePreviewState.frameSize = 0;
+  imagePreviewState.dragPointerId = null;
+  els.imagePreviewZoom.value = "1";
+  els.imagePreviewPhoto.removeAttribute("src");
+  els.imagePreviewPhoto.style.width = "";
+  els.imagePreviewPhoto.style.height = "";
+  els.imagePreviewPhoto.style.transform = "";
+  els.imagePreviewReupload.value = "";
+  els.imagePreviewModal.classList.add("hidden");
+}
+
+function getImagePreviewFrameSize() {
+  return els.imagePreviewFrame.clientWidth || 220;
+}
+
+function loadImageDimensions(dataUrl) {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.addEventListener("load", () => {
+      resolve({ width: image.naturalWidth || image.width, height: image.naturalHeight || image.height });
+    });
+    image.addEventListener("error", () => resolve(null));
+    image.src = dataUrl;
+  });
+}
+
+export function toggleGuestForm() {
+  const isOpen = els.quickGuestForm.classList.toggle("open");
+  els.quickGuestForm.setAttribute("aria-hidden", String(!isOpen));
+  els.guestToggle.setAttribute("aria-expanded", String(isOpen));
+  els.guestToggle.textContent = isOpen ? "Close" : "Add Guest Player";
+
+  if (isOpen) {
+    els.guestName.focus();
+  }
+}
+
+export function closeGuestForm() {
+  els.quickGuestForm.classList.remove("open");
+  els.quickGuestForm.setAttribute("aria-hidden", "true");
+  els.guestToggle.setAttribute("aria-expanded", "false");
+  els.guestToggle.textContent = "Add Guest Player";
+}
+
+export function renderPlayers() {
+  const visiblePlayers = getVisiblePlayersForCurrentUser();
+  const pendingPlayers = getPendingPlayersForAdmin();
+  els.playerCount.textContent = `${visiblePlayers.length} ${visiblePlayers.length === 1 ? "player" : "players"}`;
+  els.playersList.innerHTML = "";
+  renderPlayersToolbar();
+  renderPendingApprovalNotice();
+  if (!visiblePlayers.length && !(isManagePlayersMode && pendingPlayers.length)) {
+    els.playersList.appendChild(emptyState("No players yet", "Add permanent players to start building teams."));
+    return;
+  }
+
+  visiblePlayers.sort((a, b) => a.name.localeCompare(b.name)).forEach((player) => {
+    const card = createPlayerCard(player, { actions: isManagePlayersMode && canManagePlayers() ? "manage" : "" });
+    card.querySelector('[data-action="edit"]')?.addEventListener("click", () => editPlayer(player.id));
+    card.querySelector('[data-action="delete"]')?.addEventListener("click", () => deletePlayer(player.id));
+    card.querySelector('[data-action="approve"]')?.addEventListener("click", () => approvePlayer(player.id));
+    els.playersList.appendChild(card);
+  });
+
+  if (isManagePlayersMode && pendingPlayers.length) {
+    els.playersList.appendChild(renderPendingApprovalSection(pendingPlayers));
+  }
+}
+
+function renderPlayersToolbar() {
+  if (!els.showPlayerForm?.parentElement) return;
+  let manageButton = document.querySelector("#toggle-manage-players");
+  if (!canManagePlayers()) {
+    isManagePlayersMode = false;
+    manageButton?.remove();
+    return;
+  }
+
+  if (!manageButton) {
+    manageButton = document.createElement("button");
+    manageButton.id = "toggle-manage-players";
+    manageButton.type = "button";
+    manageButton.className = "secondary compact-button";
+    els.showPlayerForm.parentElement.appendChild(manageButton);
+  }
+
+  manageButton.textContent = isManagePlayersMode ? "Done Managing" : "Manage Players";
+  manageButton.classList.toggle("active", isManagePlayersMode);
+  manageButton.setAttribute("aria-pressed", isManagePlayersMode ? "true" : "false");
+  manageButton.onclick = toggleManagePlayersMode;
+}
+
+function toggleManagePlayersMode() {
+  if (!canManagePlayers()) return;
+  isManagePlayersMode = !isManagePlayersMode;
+  renderPlayers();
+}
+
+function getVisiblePlayersForCurrentUser() {
+  return state.data.players.filter((player) => player.approvalStatus === "approved");
+}
+
+function getPendingPlayersForAdmin() {
+  if (!canManagePlayers()) return [];
+  return state.data.players
+    .filter((player) => player.approvalStatus === "pending")
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() || a.name.localeCompare(b.name));
+}
+
+function getPendingPlayersForCurrentUser() {
+  const currentUser = getCurrentUser();
+  return state.data.players.filter((player) => player.approvalStatus === "pending" && player.createdBy === currentUser.id);
+}
+
+function renderPendingApprovalNotice() {
+  const existingNotice = document.querySelector(".player-pending-notice");
+  existingNotice?.remove();
+  if (canManagePlayers()) return;
+
+  const pendingPlayers = getPendingPlayersForCurrentUser();
+  if (!pendingPlayers.length || !els.playersList.parentElement) return;
+
+  const notice = document.createElement("div");
+  notice.className = "player-pending-notice";
+  notice.textContent = pendingPlayers.length === 1
+    ? "Your player is waiting for admin approval"
+    : `${pendingPlayers.length} players are waiting for admin approval`;
+  els.playersList.parentElement.insertBefore(notice, els.playersList);
+}
+
+function renderPendingApprovalSection(pendingPlayers) {
+  const section = document.createElement("section");
+  section.className = "pending-approval-section";
+  section.innerHTML = `
+    <div class="history-section-header">
+      <h3>Pending Approvals</h3>
+      <span class="pill">${pendingPlayers.length} pending</span>
+    </div>
+    <div class="pending-approval-grid"></div>
+  `;
+
+  const grid = section.querySelector(".pending-approval-grid");
+  pendingPlayers.forEach((player) => {
+    const card = createPlayerCard(player, { actions: "manage" });
+    card.querySelector('[data-action="edit"]')?.addEventListener("click", () => editPlayer(player.id));
+    card.querySelector('[data-action="delete"]')?.addEventListener("click", () => deletePlayer(player.id));
+    card.querySelector('[data-action="approve"]')?.addEventListener("click", () => approvePlayer(player.id));
+    grid.appendChild(card);
+  });
+
+  return section;
+}
+
+export function createPlayerCard(player, options = {}) {
+    const displayName = formatDisplayedPlayerName(player.name);
+    const primaryPosition = getPrimaryPosition(player);
+    const positionSummary = formatPlayerPositions(player);
+    const rating = clampRating(player.rating);
+    const actionMarkup = cardActionMarkup(player, options);
+    const card = document.createElement("article");
+  card.className = "player-card";
+  card.innerHTML = `
+    <div class="player-card-shell">
+      <div class="player-card-hero">
+        <div class="player-card-rating-block">
+          <strong class="player-card-rating">${rating}</strong>
+            <span class="player-card-position">${getRoleBadgeLabel(primaryPosition)}</span>
+        </div>
+          ${player.isGuest ? '<span class="player-card-guest-badge">Guest</span>' : ""}
+          <div class="player-card-avatar-wrap">
+            <img class="player-photo" src="${player.image || DEFAULT_AVATAR}" alt="${escapeHtml(player.name)} profile photo">
+          </div>
+            <div class="player-card-identity">
+              <strong title="${escapeHtml(player.name)}">${escapeHtml(displayName)}</strong>
+              <span class="player-card-position-list">${escapeHtml(positionSummary)}</span>
+            </div>
+          </div>
+        <div class="player-card-body">
+        <div class="player-card-stats-strip">
+          <div class="player-card-stats-row player-card-stats-labels">
+            <span>M</span>
+            <span>W</span>
+            <span>D</span>
+            <span>L</span>
+              <span>${isGoalkeeperPlayer(player) ? "\uD83E\uDDE4" : "G"}</span>
+            <span>\u2B50</span>
+          </div>
+          <div class="player-card-stats-row player-card-stats-values">
+            <strong>${player.stats?.matches ?? 0}</strong>
+            <strong>${player.stats?.wins ?? 0}</strong>
+            <strong>${player.stats?.draws ?? 0}</strong>
+            <strong>${player.stats?.losses ?? 0}</strong>
+            <strong>${isGoalkeeperPlayer(player) ? (player.stats?.cleanSheets ?? 0) : (player.stats?.goals ?? 0)}</strong>
+            <strong>${player.stats?.motm ?? 0}</strong>
+          </div>
+        </div>
+      </div>
+      ${actionMarkup ? `<div class="player-card-footer">${actionMarkup}</div>` : ""}
+    </div>
+  `;
+  return card;
+}
+
+export function cardActionMarkup(player, options) {
+  if (options.actions === "manage") {
+    const actions = [];
+    if (canEditPlayer(player) && player.approvalStatus === "approved") {
+      actions.push('<button class="icon-button" type="button" data-action="edit">Edit</button>');
+    }
+    if (canApprovePlayer() && player.approvalStatus !== "approved") {
+      actions.push('<button class="icon-button" type="button" data-action="approve">Approve</button>');
+    }
+    if (canEditPlayer(player) && player.approvalStatus !== "approved") {
+      actions.push('<button class="icon-button" type="button" data-action="edit">Edit</button>');
+    }
+    if (canDeletePlayer(player)) {
+      actions.push('<button class="icon-button delete" type="button" data-action="delete">Delete</button>');
+    }
+    if (!actions.length) return "";
+    return `
+      <div class="row-actions player-card-actions">
+        ${actions.join("")}
+      </div>
+    `;
+  }
+
+  return "";
+}
+
+export function renderMatchSelection() {
+  els.matchPlayerList.innerHTML = "";
+  const approvedPlayers = getVisiblePlayersForCurrentUser();
+  if (!approvedPlayers.length && !state.matchGuestPlayers.length) {
+    els.matchPlayerList.appendChild(emptyState("No selectable players", "Add players first, then come back to create a match."));
+    return;
+  }
+
+  approvedPlayers
+    .sort((a, b) => clampRating(b.rating) - clampRating(a.rating) || a.name.localeCompare(b.name))
+    .forEach((player) => {
+          const rating = clampRating(player.rating);
+          const label = document.createElement("label");
+          label.className = "select-player";
+          label.innerHTML = `
+            <input type="checkbox" ${state.selectedPlayerIds.has(player.id) ? "checked" : ""}>
+            <span>${escapeHtml(player.name)} - ${escapeHtml(formatPlayerPositions(player))} - ${rating}</span>
+          `;
+        label.querySelector("input").addEventListener("change", (changeEvent) => {
+          if (changeEvent.target.checked) addSelectedPlayerId(player.id);
+          else removeSelectedPlayerId(player.id);
+  clearTeams();
+  updateFormationOptions();
+  clearManualSwapSelection();
+  renderMatchSection();
+        });
+        els.matchPlayerList.appendChild(label);
+      });
+
+  state.matchGuestPlayers.forEach((player) => {
+      const rating = clampRating(player.rating);
+      const row = document.createElement("div");
+      row.className = "select-player select-player-guest";
+      row.innerHTML = `
+        <span class="select-player-text">${escapeHtml(player.name)} - ${escapeHtml(formatPlayerPositions(player))} - ${rating}</span>
+        <span class="select-player-guest-badge" aria-label="Guest player">Guest</span>
+        <button class="icon-button delete compact-button" type="button">Remove</button>
+      `;
+    row.querySelector("button").addEventListener("click", () => {
+      removeMatchGuestPlayer(player.id);
+      clearTeams();
+      updateFormationOptions();
+      renderMatchSection();
+    });
+    els.matchPlayerList.appendChild(row);
+  });
+
+  updateFormationOptions();
+}
+
+export function renderTeams() {
+  els.teamsArea.innerHTML = "";
+  const currentMatchStatus = state.currentTeams ? getMatchStatus(state.currentTeams) : null;
+  const isDraftMatch = Boolean(state.currentTeams?.isDraft);
+  const isSavedMatch = Boolean(state.currentTeams && !state.currentTeams.isDraft);
+  const isReadOnlySavedMatch = Boolean(isSavedMatch && !isEditingMatch);
+  const finishedAwaitingResult = hasFinishedAwaitingResult(state.currentTeams, currentMatchStatus);
+  const canOpenResult = Boolean(
+      isSavedMatch && (currentMatchStatus === "pending_result" || currentMatchStatus === "completed")
+  );
+  els.matchFinishedModal.classList.toggle("hidden", !finishedAwaitingResult || state.currentTeams?.resultOpen);
+  els.resultForm.classList.toggle("hidden", !canOpenResult || !state.currentTeams?.resultOpen);
+  els.createMatch.classList.toggle("hidden", !isDraftMatch || currentMatchStatus !== "upcoming");
+  if (!state.currentTeams) {
+    clearLiveTimer();
+    els.reshuffleTeams.disabled = true;
+    els.teamBalanceNote.textContent = "Select at least two players to generate teams.";
+    els.matchFinishedModal.classList.add("hidden");
+    els.createMatch.classList.add("hidden");
+    els.teamsArea.appendChild(emptyState("No teams yet", "Generate teams to see the match setup here."));
+    return;
+  }
+
+  const scheduleFields = getScheduleFieldValues(state.currentTeams);
+  els.matchDate.value = scheduleFields.matchDate;
+  setTimeSelectorValues("start", scheduleFields.startTime);
+  setTimeSelectorValues("end", scheduleFields.endTime);
+  const difference = Math.abs(teamRating(state.currentTeams.teamA) - teamRating(state.currentTeams.teamB));
+  const teamsAreBalanced = state.currentTeams.teamA.length === state.currentTeams.teamB.length;
+  const fallbackNote = state.currentTeams.fallbackUsed
+    ? " Best possible placement used; some players may be out of position."
+    : "";
+  els.teamBalanceNote.textContent = teamsAreBalanced
+    ? `${balanceLabel(difference)} Rating difference: ${difference}. ${goalkeeperNote(state.currentTeams)}${fallbackNote}`
+    : "Teams are not balanced. Please make equal players before saving.";
+  els.createMatch.disabled = !state.currentTeams?.isDraft || !teamsAreBalanced;
+  normalizeCaptains();
+  normalizeTeamFormations();
+
+  if (isLiveMatch(state.currentTeams)) {
+    els.matchFinishedModal.classList.add("hidden");
+    els.resultForm.classList.add("hidden");
+    els.teamsArea.appendChild(renderLiveMatch(state.currentTeams));
+    return;
+  }
+
+  clearLiveTimer();
+  if (isReadOnlySavedMatch) {
+    els.teamsArea.appendChild(renderMatchDetailHeader(state.currentTeams));
+  }
+  els.teamsArea.appendChild(renderStandardMatchView(state.currentTeams, currentMatchStatus, {
+      editable: !isReadOnlySavedMatch,
+      showEditActions: Boolean(isSavedMatch && isEditingMatch)
+    }));
+  if (isReadOnlySavedMatch) {
+    els.teamsArea.appendChild(renderMatchDetailActions(state.currentTeams));
+  }
+  if (currentMatchStatus === "completed" && state.currentTeams.result) {
+    els.teamsArea.appendChild(renderCompletedMatchSummary(state.currentTeams));
+  }
+
+  renderMotmOptions(els);
+  renderResultSection(els);
+}
+
+export function renderMatchSection() {
+  renderMatchLanding();
+  renderMatchSelection();
+  renderTeams();
+  renderMatchWizard();
+  updateMatchStepActions();
+}
+
+export function renderStats() {
+  els.leaderboard.innerHTML = "";
+  els.statsTabs.forEach((button) => {
+    const isActive = button.dataset.statsTab === activeStatsTab;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-selected", isActive ? "true" : "false");
+  });
+
+  if (!state.data.players.length) {
+    els.leaderboard.appendChild(emptyState("No stats available yet", "Saved matches will build your leaderboard."));
+    return;
+  }
+
+  const config = getStatsTabConfig(activeStatsTab);
+  const players = [...state.data.players]
+    .map((player) => ({ player, value: Number(player.stats?.[config.key]) || 0 }))
+    .sort((a, b) => b.value - a.value || a.player.name.localeCompare(b.player.name));
+
+  if (!players.some(({ value }) => value > 0)) {
+    els.leaderboard.appendChild(emptyState("No stats available yet", "Complete matches to populate this leaderboard."));
+    return;
+  }
+
+  const header = document.createElement("div");
+  header.className = "leaderboard-header";
+  header.innerHTML = `
+    <span>#</span>
+    <span>Player</span>
+    <span>${escapeHtml(config.label)}</span>
+  `;
+  els.leaderboard.appendChild(header);
+
+  players
+    .filter(({ value }) => value > 0)
+    .forEach(({ player, value }, index) => {
+      els.leaderboard.appendChild(createStatsLeaderboardRow(player, value, index, config));
+    });
+}
+
+export function setActiveStatsTab(tab) {
+  const nextTab = getStatsTabConfig(tab).key;
+  if (activeStatsTab === nextTab) return;
+  activeStatsTab = nextTab;
+  renderStats();
+}
+
+export function renderHistory() {
+  els.historyList.innerHTML = "";
+  const now = Date.now();
+  const completedMatches = state.data.matches.filter((match) => isCompletedMatch(match, now));
+  if (!completedMatches.length && !hasPermission("viewAuditLog")) {
+    els.historyList.appendChild(emptyState("No completed matches", "Save a result to build your archive."));
+    return;
+  }
+  if (completedMatches.length) {
+    els.historyList.appendChild(createHistorySection("Completed Matches", "Completed", completedMatches));
+  }
+  if (hasPermission("viewAuditLog")) {
+    els.historyList.appendChild(createActivityLogSection());
+  }
+}
+
+export function clearAllData() {
+  if (!confirm("Clear all players, matches, and saved statistics from this device?")) return;
+  resetAppData();
+  render();
+}
+
+export function cancelMatchCreation() {
+  const confirmed = confirm("Cancel match creation?");
+  if (!confirmed) return;
+  resetMatchSetupState();
+  switchTab("match");
+  render();
+}
+
+export function initUI() {
+  initTimeSelectors();
+  syncMatchWizardStep();
+  syncPlayerFormVisibility();
+  startMatchStatusRefresh();
+  render();
+}
+
+export function startMatchCreation() {
+  resetMatchSetupState();
+  showAllHomeUpcomingMatches = false;
+  matchWizardStep = 1;
+  renderMatchSection();
+}
+
+export function createMatchAndReturnHome() {
+  if (!state.currentTeams?.isDraft) return;
+  if (state.currentTeams.teamA.length !== state.currentTeams.teamB.length) {
+    els.teamBalanceNote.textContent = "Teams must have equal number of players";
+    return;
+  }
+  persistCurrentMatch({
+    forceSave: true,
+    status: "upcoming",
+    auditAction: "match_created",
+    logAction: "match_created"
+  });
+  homeFeedbackMessage = "Match Created Successfully";
+  resetMatchSetupState();
+  switchTab("home");
+  render();
+}
+
+export function goToMatchLandingStep() {
+  if (state.currentTeams) return;
+  matchWizardStep = 0;
+  renderMatchWizard();
+}
+
+export function goToMatchTimeStep() {
+  matchWizardStep = 1;
+  renderMatchWizard();
+}
+
+export function goToPlayerSelectionStep() {
+  matchWizardStep = 2;
+  renderMatchWizard();
+}
+
+export function goToLineupStep() {
+  matchWizardStep = 3;
+  renderMatchWizard();
+}
+
+export function startMatchStatusRefresh() {
+  stopMatchStatusRefresh();
+  matchStatusRefreshId = window.setInterval(() => {
+    refreshMatchStatusUI();
+  }, 30000);
+}
+
+export function stopMatchStatusRefresh() {
+  if (!matchStatusRefreshId) return;
+  window.clearInterval(matchStatusRefreshId);
+  matchStatusRefreshId = null;
+}
+
+function emptyState(title, body) {
+  const node = els.emptyTemplate.content.firstElementChild.cloneNode(true);
+  node.querySelector("strong").textContent = title;
+  node.querySelector("p").textContent = body;
+  return node;
+}
+
+function createHistorySection(title, badge, matches) {
+  const section = document.createElement("section");
+  section.className = "history-section";
+  section.innerHTML = `
+    <div class="history-section-header">
+      <h3>${title}</h3>
+      <span class="pill">${badge}</span>
+    </div>
+    <div class="history-section-list"></div>
+  `;
+
+  const list = section.querySelector(".history-section-list");
+  if (!matches.length) {
+    list.appendChild(
+      emptyState(
+        `No ${badge.toLowerCase()} matches`,
+        badge === "Upcoming" ? "Create a match to see it here." : "Save a result to build your archive."
+      )
+    );
+    return section;
+  }
+
+  matches.forEach((match) => {
+    list.appendChild(createHistoryCard(match));
+  });
+
+  return section;
+}
+
+function createActivityLogSection() {
+  const section = document.createElement("section");
+  section.className = "history-section";
+  const logs = [...(state.data.activityLog || [])].slice(0, 30);
+  section.innerHTML = `
+    <div class="history-section-header">
+      <h3>Activity Log</h3>
+      <span class="pill">Audit</span>
+    </div>
+    <div class="history-section-list"></div>
+  `;
+  const list = section.querySelector(".history-section-list");
+  if (!logs.length) {
+    list.appendChild(emptyState("No activity yet", "Player and match changes will appear here."));
+    return section;
+  }
+
+  logs.forEach((entry) => {
+    const card = document.createElement("article");
+    card.className = "history-card audit-log-card";
+    card.innerHTML = `
+      <div class="history-title">
+        <div>
+          <strong>${escapeHtml(formatAuditAction(entry.action))}</strong>
+          <div class="audit-meta">
+            <span>${escapeHtml(entry.entityType)} ${escapeHtml(entry.entityId)}</span>
+            <span>By ${escapeHtml(entry.byName || getUserName(entry.by))}</span>
+            <span>${formatDate(entry.at)}</span>
+          </div>
+        </div>
+      </div>
+    `;
+    list.appendChild(card);
+  });
+
+  return section;
+}
+
+function createHistoryCard(match) {
+  const card = document.createElement("article");
+  card.className = "history-card";
+  const teamAName = match.teamAName || "Team A";
+  const teamBName = match.teamBName || "Team B";
+  const result = getMatchResult(match);
+  const computedStatus = getMatchStatus(match);
+  const resultLabel = result
+    ? result.scoreA > result.scoreB
+      ? `${teamAName} won`
+      : result.scoreB > result.scoreA
+        ? `${teamBName} won`
+        : "Draw"
+    : capitalizeLabel(computedStatus);
+  card.innerHTML = `
+    <div class="history-title">
+      <div>
+        <strong>${formatReadableMatchWindow(match)}</strong>
+        <div class="history-meta">
+          <span class="pill">${capitalizeLabel(computedStatus)}</span>
+        </div>
+      </div>
+    </div>
+    ${computedStatus === "completed" && result ? `
+      <div class="match-score-row">
+        <span class="team-name left">${escapeHtml(teamAName)}</span>
+        <span class="score">
+          <span class="score-a">${result.scoreA}</span>
+          <span class="divider">:</span>
+          <span class="score-b">${result.scoreB}</span>
+        </span>
+        <span class="team-name right">${escapeHtml(teamBName)}</span>
+      </div>
+      <div class="match-result">
+        ${escapeHtml(resultLabel)}
+      </div>
+    ` : ""}
+    <div class="history-summary">
+      <p><strong>${matchResultText(match)}</strong></p>
+      ${computedStatus === "completed" ? `<p>${motmName(match) ? `<span class="motm">MOTM ${escapeHtml(motmName(match))}</span>` : "MOTM: Not selected"}</p>` : ""}
+      ${computedStatus === "completed" ? `<p>Scorers: ${scorersText(match)}</p>` : ""}
+      ${match.managerName ? `<p>Manager: ${escapeHtml(match.managerName)}${managerHistoryTeam(match, teamAName, teamBName)}</p>` : ""}
+      <div class="audit-meta">
+        <span>Created by ${escapeHtml(formatAuditUser(match.createdBy, match.createdByName))}</span>
+        <span>Last edited by ${escapeHtml(formatAuditUser(match.updatedBy || match.createdBy, match.updatedByName || match.createdByName))}</span>
+      </div>
+    </div>
+    <div class="row-actions history-actions">
+      <button class="secondary compact-button" type="button" data-history-view>View Match</button>
+      ${canEditMatch(match) ? '<button class="primary compact-button" type="button" data-history-edit-result>Edit Result</button>' : ""}
+    </div>
+  `;
+  card.querySelector("[data-history-view]").addEventListener("click", () => openMatchInViewMode(match, { switchTab: true }));
+  card.querySelector("[data-history-edit-result]")?.addEventListener("click", () => openResultEditorForMatch(match));
+  return card;
+}
+
+function isKnownRole(value) {
+  return roles.includes(value);
+}
+
+function capitalizeLabel(value) {
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : "";
+}
+
+function formatRoleLabel(role) {
+  return String(role || "user")
+    .split("_")
+    .map(capitalizeLabel)
+    .join(" ");
+}
+
+function formatAuditAction(action) {
+  return String(action || "edited")
+    .replaceAll("_", " ")
+    .split(" ")
+    .map(capitalizeLabel)
+    .join(" ");
+}
+
+function formatAuditUser(userId, fallbackName = "") {
+  return fallbackName || getUserName(userId) || "Unknown";
+}
+
+function getRoleBadgeLabel(role) {
+  return isKnownRole(role) ? role : "N/A";
+}
+
+function getSelectedFormPositions(primaryValue, secondaryValue = "", tertiaryValue = "") {
+  const ordered = [
+    isKnownRole(primaryValue) ? primaryValue : "CM",
+    isKnownRole(secondaryValue) ? secondaryValue : "",
+    isKnownRole(tertiaryValue) ? tertiaryValue : ""
+  ].filter(Boolean);
+  const unique = [...new Set(ordered)];
+  return {
+    primary: unique[0] || "CM",
+    secondary: unique[1] || "",
+    tertiary: unique[2] || ""
+  };
+}
+
+function formatPlayerPositions(player) {
+  const positions = getPlayerPositions(player);
+  return positions.length ? positions.join(" / ") : "CM";
+}
+
+function formatDisplayedPlayerName(name) {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) return parts[0] || "";
+  return `${parts[0]} ${parts[1].charAt(0)}.`;
+}
+
+function getStatsTabConfig(tab) {
+  const configs = {
+    goals: { key: "goals", label: "Goals" },
+    wins: { key: "wins", label: "Wins" },
+    draws: { key: "draws", label: "Draws" },
+    losses: { key: "losses", label: "Losses" },
+    motm: { key: "motm", label: "MVP" }
+  };
+  return configs[tab] || configs.goals;
+}
+
+function createStatsLeaderboardRow(player, value, index, config) {
+  const row = document.createElement("article");
+  const displayName = formatDisplayedPlayerName(player.name);
+  row.className = `leaderboard-row${index < 3 ? " top-three" : ""}`;
+  row.innerHTML = `
+    <span class="leaderboard-rank">${index + 1}</span>
+    <div class="leaderboard-player">
+      <img class="leaderboard-avatar" src="${player.image || DEFAULT_AVATAR}" alt="${escapeHtml(player.name)} profile photo">
+      <div class="leaderboard-player-copy">
+        <strong title="${escapeHtml(player.name)}">${escapeHtml(displayName)}</strong>
+        <span>${escapeHtml(config.label)}</span>
+      </div>
+    </div>
+    <strong class="leaderboard-value">${value}</strong>
+  `;
+  return row;
+}
+
+function formatReadableMatchWindow(match) {
+  const start = new Date(matchStartTime(match));
+  const end = new Date(matchEndTime(match));
+  if (Number.isNaN(start.getTime())) return "Date not set";
+  const dateLabel = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(start);
+  const startLabel = new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(start);
+  if (Number.isNaN(end.getTime())) return `${dateLabel} \u2022 ${startLabel}`;
+  const endLabel = new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(end);
+  return `${dateLabel} \u2022 ${startLabel} \u2013 ${endLabel}`;
+}
+
+function getScheduleFieldValues(match) {
+  const start = new Date(match.startTime || match.matchTime || matchDateTime(match));
+  const end = new Date(match.endTime || match.startTime || match.matchTime || matchDateTime(match));
+  const matchDate = Number.isNaN(start.getTime()) ? "" : start.toISOString().slice(0, 10);
+  const startTime = Number.isNaN(start.getTime()) ? getDefaultRoundedTime() : toLocalTimeValue(start);
+  const endTime = Number.isNaN(end.getTime()) ? addMinutesToTime(startTime, 60) : toLocalTimeValue(end);
+  return { matchDate, startTime, endTime };
+}
+
+function toLocalTimeValue(date) {
+  const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return offsetDate.toISOString().slice(11, 16);
+}
+
+function initTimeSelectors() {
+  populateTimeSelect(els.matchStartHour, buildHourOptions());
+  populateTimeSelect(els.matchEndHour, buildHourOptions());
+  populateTimeSelect(els.matchStartMinute, buildMinuteOptions());
+  populateTimeSelect(els.matchEndMinute, buildMinuteOptions());
+  const defaultStart = getDefaultRoundedTime();
+  setTimeSelectorValues("start", defaultStart);
+  setTimeSelectorValues("end", addMinutesToTime(defaultStart, 60));
+}
+
+function populateTimeSelect(select, values) {
+  if (!select || select.options.length) return;
+  select.innerHTML = values.map((value) => `<option value="${value}">${value}</option>`).join("");
+}
+
+function buildHourOptions() {
+  return Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, "0"));
+}
+
+function buildMinuteOptions() {
+  return Array.from({ length: 12 }, (_, index) => String(index * 5).padStart(2, "0"));
+}
+
+function setTimeSelectorValues(prefix, time24) {
+  const { hour12, minute, period } = to12HourParts(time24);
+  const hourSelect = prefix === "start" ? els.matchStartHour : els.matchEndHour;
+  const minuteSelect = prefix === "start" ? els.matchStartMinute : els.matchEndMinute;
+  const periodSelect = prefix === "start" ? els.matchStartPeriod : els.matchEndPeriod;
+  hourSelect.value = hour12;
+  minuteSelect.value = minute;
+  periodSelect.value = period;
+}
+
+function to12HourParts(time24) {
+  const [hours = "00", minutes = "00"] = String(time24).split(":");
+  const hourValue = Number(hours) || 0;
+  const period = hourValue >= 12 ? "PM" : "AM";
+  const hour12Value = hourValue % 12 || 12;
+  return {
+    hour12: String(hour12Value).padStart(2, "0"),
+    minute: String(minutes).padStart(2, "0"),
+    period
+  };
+}
+
+function getDefaultRoundedTime() {
+  const now = new Date();
+  const rounded = new Date(now);
+  rounded.setSeconds(0, 0);
+  rounded.setMinutes(Math.round(now.getMinutes() / 5) * 5);
+  if (rounded.getMinutes() === 60) {
+    rounded.setHours(rounded.getHours() + 1);
+    rounded.setMinutes(0);
+  }
+  return `${String(rounded.getHours()).padStart(2, "0")}:${String(rounded.getMinutes()).padStart(2, "0")}`;
+}
+
+function addMinutesToTime(time24, minutesToAdd) {
+  const [hours = "00", minutes = "00"] = String(time24).split(":");
+  const value = new Date(2000, 0, 1, Number(hours) || 0, Number(minutes) || 0, 0, 0);
+  value.setMinutes(value.getMinutes() + minutesToAdd);
+  return `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
+}
+
+function renderHomeFeedback() {
+  els.homeFeedback.innerHTML = homeFeedbackMessage
+    ? `<div class="success-toast">${escapeHtml(homeFeedbackMessage)}</div>`
+    : "";
+}
+
+function syncPlayerFormVisibility() {
+  els.playerForm.classList.toggle("hidden", !isPlayerFormVisible);
+  els.showPlayerForm.classList.toggle("hidden", isPlayerFormVisible);
+}
+
+function renderMatchLanding() {
+  els.matchUpcomingList.innerHTML = "";
+  const upcomingMatches = state.data.matches
+    .filter((match) => isUpcomingMatch(match))
+    .sort((a, b) => matchStartTimeValue(a) - matchStartTimeValue(b));
+
+  if (!upcomingMatches.length) {
+    els.matchUpcomingList.appendChild(emptyState("No upcoming matches", "Create a match to see it here."));
+    return;
+  }
+
+  upcomingMatches.forEach((match, index) => {
+    const card = createUpcomingMatchCard(match, {
+      isNextMatch: index === 0,
+      onView: () => {
+        openMatchInViewMode(match);
+      }
+    });
+    els.matchUpcomingList.appendChild(card);
+  });
+}
+
+function renderMatchWizard() {
+  syncMatchWizardStep();
+  const activeStep = getActiveMatchStep();
+  const isReadOnlySavedMatch = Boolean(state.currentTeams && !state.currentTeams.isDraft && !isEditingMatch);
+  els.matchStepIndicator.classList.toggle("hidden", activeStep === 0 || isReadOnlySavedMatch);
+  els.matchStepPanels.forEach((panel) => {
+    const isActive = panel.id === getMatchStepPanelId(activeStep);
+    panel.classList.toggle("hidden", !isActive);
+    panel.classList.toggle("is-active", isActive);
+  });
+
+  els.matchStepIndicator.querySelectorAll("[data-step-indicator]").forEach((node) => {
+    const step = Number(node.dataset.stepIndicator);
+    node.classList.toggle("active", step === activeStep);
+    node.classList.toggle("complete", step < activeStep);
+  });
+
+  const canGoBackFromLineup = Boolean(state.currentTeams && getMatchStatus(state.currentTeams) === "upcoming");
+  els.matchBackToSelection.classList.toggle("hidden", !canGoBackFromLineup || (!state.currentTeams?.isDraft && !isEditingMatch));
+  els.cancelMatch.classList.toggle("hidden", !(activeStep === 3 && state.currentTeams?.isDraft));
+}
+
+function syncMatchWizardStep() {
+  if (state.currentTeams && !state.currentTeams.isDraft && !isEditingMatch) {
+    matchWizardStep = 3;
+    return;
+  }
+
+  if (state.currentTeams && getMatchStatus(state.currentTeams) !== "upcoming") {
+    matchWizardStep = 3;
+    return;
+  }
+
+  if (state.currentTeams && matchWizardStep === 0) {
+    matchWizardStep = 3;
+    return;
+  }
+
+  if (!state.currentTeams && matchWizardStep === 3) {
+    matchWizardStep = hasMatchScheduleValue() ? 2 : 1;
+  }
+}
+
+function getActiveMatchStep() {
+  if (state.currentTeams && getMatchStatus(state.currentTeams) !== "upcoming") return 3;
+  if (state.currentTeams && matchWizardStep === 0) return 3;
+  return matchWizardStep;
+}
+
+function hasMatchScheduleValue() {
+  return Boolean(
+    els.matchDate.value ||
+    els.matchStartHour.value ||
+    els.matchStartMinute.value ||
+    els.matchStartPeriod.value ||
+    els.matchEndHour.value ||
+    els.matchEndMinute.value ||
+    els.matchEndPeriod.value
+  );
+}
+
+function updateMatchStepActions() {
+  els.matchNextToPlayers.disabled = !hasValidScheduleInputs();
+  els.generateTeams.disabled = !hasValidPlayerSelection();
+  els.createMatch.disabled = !state.currentTeams?.isDraft
+    || (Boolean(state.currentTeams) && state.currentTeams.teamA.length !== state.currentTeams.teamB.length);
+}
+
+function hasValidScheduleInputs() {
+  return getMatchSettings(getCurrentScheduleValue()).ok;
+}
+
+function hasValidPlayerSelection() {
+  const selectedPlayers = state.data.players.filter((player) => player.approvalStatus === "approved" && state.selectedPlayerIds.has(player.id));
+  return validateSelectedPlayersForMatch([...selectedPlayers, ...state.matchGuestPlayers]).ok;
+}
+
+function getCurrentScheduleValue() {
+  return [els.matchDate.value, getSelectedTimeValue("start"), getSelectedTimeValue("end")].join("|");
+}
+
+function getMatchStepPanelId(step) {
+  if (step === 0) return "match-step-landing";
+  if (step === 1) return "match-step-time";
+  if (step === 2) return "match-step-players";
+  return "match-step-lineup";
+}
+
+function renderStandardMatchView(teams, matchStatus, options = {}) {
+  const card = createPitchCard();
+  const isEditable = options.editable !== false;
+  const showEditActions = Boolean(options.showEditActions);
+  const viewOptions = {
+    readOnly: !isEditable,
+    onFormationChange: isEditable ? handleFormationChange : null,
+    onTeamNameChange: isEditable ? handleTeamNameChange : null,
+    onCaptainChange: isEditable ? handleCaptainChange : null,
+    onManualSwap: isEditable && editActionMode ? handleManualSwapSelection : null,
+    isManualSwapMode: Boolean(editActionMode),
+    activeSwap: editActionMode ? activeEditSelection : null
+  };
+  const headers = renderTeamHeaders(teams, viewOptions);
+  const selectors = renderFormationSelectors(teams, viewOptions);
+  const pitch = renderPitchSurface(teams);
+
+  if (selectors) pitch.appendChild(selectors);
+  card.append(headers, pitch);
+  appendPitchPlayers(pitch, teams, viewOptions);
+  if (isEditable) card.append(renderManualSwapToolbar());
+  if (showEditActions) card.append(renderMatchEditActions());
+  return card;
+}
+
+function renderMatchDetailHeader(match) {
+  const card = document.createElement("article");
+  card.className = "card match-detail-header";
+  const editHistory = Array.isArray(match.editHistory) ? match.editHistory.slice(-3).reverse() : [];
+  card.innerHTML = `
+    <div class="match-detail-copy">
+      <p class="eyebrow">Match View</p>
+      <h3>${escapeHtml(match.teamAName || "Team A")} vs ${escapeHtml(match.teamBName || "Team B")}</h3>
+      <p>${formatReadableMatchWindow(match)}</p>
+      <div class="audit-meta">
+        <span>Created by ${escapeHtml(formatAuditUser(match.createdBy, match.createdByName))}</span>
+        <span>Last edited by ${escapeHtml(formatAuditUser(match.updatedBy || match.createdBy, match.updatedByName || match.createdByName))}</span>
+        ${editHistory.map((entry) => `<span>${escapeHtml(formatAuditAction(entry.action))} by ${escapeHtml(entry.byName || getUserName(entry.by))}</span>`).join("")}
+      </div>
+    </div>
+  `;
+  return card;
+}
+
+function renderMatchDetailActions(match) {
+    const currentStatus = getMatchStatus(match);
+    const isUpcomingEditable = currentStatus === "upcoming";
+    const canEditResult = currentStatus === "pending_result" || currentStatus === "completed";
+    const userCanEditMatch = canEditMatch(match);
+    const userCanDeleteMatch = canDeleteMatch(match);
+    const card = document.createElement("div");
+    card.className = "match-detail-actions";
+    card.innerHTML = `
+      <button class="secondary match-detail-button" type="button" data-match-back>Back</button>
+      <button class="primary match-detail-button" type="button" data-save-lineup>Save Lineup</button>
+      ${userCanDeleteMatch ? '<button id="deleteMatchBtn" class="secondary danger match-detail-button" type="button">Delete Match</button>' : ""}
+      ${canEditResult && userCanEditMatch ? '<button class="secondary match-detail-button" type="button" data-match-result>Edit Result</button>' : ""}
+      ${isUpcomingEditable && userCanEditMatch ? '<button class="primary match-detail-button" type="button" data-match-edit>Edit Match</button>' : ""}
+    `;
+    const buttonCount = card.querySelectorAll("button").length;
+    card.style.gridTemplateColumns = `repeat(${buttonCount}, minmax(0, 1fr))`;
+    card.querySelector("[data-match-back]").addEventListener("click", returnToMatchList);
+    card.querySelector("[data-save-lineup]").addEventListener("click", () => {
+      saveCurrentLineup(match);
+    });
+    card.querySelector("#deleteMatchBtn")?.addEventListener("click", () => {
+      const confirmDelete = confirm("Are you sure you want to delete this match?");
+      if (!confirmDelete) return;
+      deleteCurrentMatch(match.id);
+    });
+    card.querySelector("[data-match-result]")?.addEventListener("click", () => openResultEditorForMatch(match));
+    card.querySelector("[data-match-edit]")?.addEventListener("click", () => {
+    editingMatchSnapshot = cloneMatchSnapshot(serializeCurrentMatch() || match);
+    hasPendingMatchEdits = false;
+    isEditingMatch = true;
+    matchWizardStep = 3;
+    renderMatchSection();
+  });
+  return card;
+}
+
+function renderMatchEditActions() {
+  const card = document.createElement("div");
+  card.className = "match-detail-actions match-edit-actions";
+  card.innerHTML = `
+    <button class="secondary match-detail-button" type="button" data-edit-cancel>Cancel</button>
+    <button class="primary match-detail-button" type="button" data-edit-finish>Finish Editing</button>
+  `;
+  card.querySelector("[data-edit-cancel]").addEventListener("click", cancelMatchEditing);
+  card.querySelector("[data-edit-finish]").addEventListener("click", finishMatchEditing);
+  return card;
+}
+
+function renderManualSwapToolbar() {
+  const card = document.createElement("div");
+  card.className = "manual-swap-toolbar";
+  card.innerHTML = `
+    <button class="secondary compact-button swap-position-button ${editActionMode === "same_team_swap" ? "active" : ""}" type="button" data-edit-action-mode="same_team_swap" aria-pressed="${editActionMode === "same_team_swap" ? "true" : "false"}">
+      Swap Position
+    </button>
+    <button class="secondary compact-button swap-position-button ${editActionMode === "cross_team_swap" ? "active" : ""}" type="button" data-edit-action-mode="cross_team_swap" aria-pressed="${editActionMode === "cross_team_swap" ? "true" : "false"}">
+      Team Shift
+    </button>
+    <span>${escapeHtml(getManualSwapHelperText())}</span>
+  `;
+  card.querySelectorAll("[data-edit-action-mode]").forEach((button) => {
+    button.addEventListener("click", () => startEditActionMode(button.dataset.editActionMode));
+  });
+  return card;
+}
+
+function returnToMatchList() {
+  resetMatchSetupState();
+  renderMatchSection();
+}
+
+function deleteCurrentMatch(matchId) {
+  if (!matchId) return;
+  const match = state.data.matches.find((item) => item.id === matchId);
+  if (!canDeleteMatch(match)) {
+    alert("You do not have permission to delete this match.");
+    return;
+  }
+  removeMatch(matchId);
+  logActivity("match_deleted", "match", matchId, {
+    label: match ? `${match.teamAName || "Team A"} vs ${match.teamBName || "Team B"}` : ""
+  });
+  persist();
+  resetMatchSetupState();
+  switchTab("match");
+  render();
+}
+
+function saveCurrentLineup(match) {
+  const teamAPlayers = match.teamA || match.teamAPlayers || [];
+  const teamBPlayers = match.teamB || match.teamBPlayers || [];
+  const matchData = {
+    teamA: teamAPlayers,
+    teamB: teamBPlayers,
+    formationA: match.formationA || match.formation || "",
+    formationB: match.formationB || match.formation || "",
+    date: new Date().toISOString()
+  };
+  localStorage.setItem("currentMatch", JSON.stringify(matchData));
+  const pitch = els.teamsArea.querySelector(".football-pitch");
+  const html2canvas = window.html2canvas;
+
+  if (!pitch || typeof html2canvas !== "function") {
+    alert("Lineup saved successfully");
+    return;
+  }
+
+  html2canvas(pitch).then((canvas) => {
+    const link = document.createElement("a");
+    link.download = "lineup.png";
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+    alert("Lineup saved successfully");
+  }).catch((error) => {
+    console.error("Failed to export lineup image.", error);
+    alert("Lineup saved successfully");
+  });
+}
+
+async function exportLineupImage(match, triggerButton) {
+  const html2canvas = window.html2canvas;
+  if (typeof html2canvas !== "function") {
+    console.warn("html2canvas is unavailable. Skipping lineup export.");
+    alert("Lineup export is not available right now. Please refresh and try again.");
+    return;
+  }
+
+  const sourcePitch = els.teamsArea.querySelector(".football-pitch");
+  if (!sourcePitch) {
+    alert("No lineup is available to export.");
+    return;
+  }
+
+  const exportNode = buildLineupExportNode(sourcePitch, match);
+  setExportLoadingState(triggerButton, true);
+  document.body.appendChild(exportNode);
+
+  try {
+    await waitForImagesInElement(exportNode);
+    const canvas = await html2canvas(exportNode, {
+      backgroundColor: "#0f1720",
+      scale: Math.max(2, window.devicePixelRatio || 1),
+      useCORS: true,
+      logging: false,
+      scrollX: 0,
+      scrollY: 0,
+      windowWidth: exportNode.scrollWidth,
+      windowHeight: exportNode.scrollHeight
+    });
+    downloadCanvasAsPng(canvas, `match-lineup-${Date.now()}.png`);
+  } catch (error) {
+    console.error("Failed to export lineup image.", error);
+    alert("Could not save the lineup image. Please try again.");
+  } finally {
+    setExportLoadingState(triggerButton, false);
+    exportNode.remove();
+  }
+}
+
+function setExportLoadingState(button, isLoading) {
+  if (!button) return;
+  if (!button.dataset.defaultLabel) {
+    button.dataset.defaultLabel = button.textContent.trim();
+  }
+  button.disabled = Boolean(isLoading);
+  button.textContent = isLoading ? "Preparing export..." : button.dataset.defaultLabel;
+  button.setAttribute("aria-busy", isLoading ? "true" : "false");
+}
+
+function buildLineupExportNode(sourcePitch, match) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "lineup-export-shell";
+  const width = Math.max(420, Math.round(sourcePitch.getBoundingClientRect().width || sourcePitch.offsetWidth || 420));
+  wrapper.style.width = `${width + 40}px`;
+
+  const title = document.createElement("div");
+  title.className = "lineup-export-heading";
+  title.innerHTML = `
+    <strong>${escapeHtml(match.teamAName || "Team A")} vs ${escapeHtml(match.teamBName || "Team B")}</strong>
+    <span>${formatReadableMatchWindow(match)}</span>
+  `;
+
+  const pitchClone = sourcePitch.cloneNode(true);
+  pitchClone.classList.add("lineup-export-pitch");
+
+  wrapper.append(title, pitchClone);
+  return wrapper;
+}
+
+function waitForImagesInElement(container) {
+  const images = [...container.querySelectorAll("img")];
+  return Promise.all(images.map((image) => waitForImage(image)));
+}
+
+function waitForImage(image) {
+  if (image.complete && image.naturalWidth > 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    image.addEventListener("load", resolve, { once: true });
+    image.addEventListener("error", resolve, { once: true });
+  });
+}
+
+function downloadCanvasAsPng(canvas, filename) {
+  const link = document.createElement("a");
+  link.href = canvas.toDataURL("image/png");
+  link.download = filename;
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+function handleFormationChange(teamKey, formation) {
+  if (!state.currentTeams || !formation) return;
+  let rebuildError = "";
+  activeEditSelection = null;
+  editActionMessage = "";
+
+  updateTeams((teams) => {
+    const sourceKey = teamKey === "a" ? "teamA" : "teamB";
+    const formationKey = teamKey === "a" ? "formationA" : "formationB";
+    const rebuiltLineup = regenerateTeamLineup(teams[sourceKey], formation);
+
+    if (!rebuiltLineup.ok) {
+      rebuildError = rebuiltLineup.message || "Could not rebuild lineup for that formation.";
+      return teams;
+    }
+
+    return {
+      ...teams,
+      [formationKey]: formation,
+      [sourceKey]: rebuiltLineup.players,
+      fallbackUsed: teams.fallbackUsed || rebuiltLineup.fallbackUsed
+    };
+  });
+
+  if (rebuildError) {
+    console.warn("Formation change skipped.", { teamKey, formation, message: rebuildError });
+    alert(rebuildError);
+    renderTeams();
+    return;
+  }
+
+  markPendingMatchEdits();
+  logActivity("formation_changed", "match", state.currentTeams.id, { teamKey, formation });
+  renderTeams();
+}
+
+function startEditActionMode(mode) {
+  if (editActionMode === mode) {
+    clearEditActionMode();
+    renderTeams();
+    return;
+  }
+
+  editActionMode = mode;
+  activeEditSelection = null;
+  editActionMessage = mode === "cross_team_swap"
+    ? "Choose one player, then one player from the opposite team."
+    : "Choose two players from the same team.";
+  renderTeams();
+}
+
+function clearEditActionMode() {
+  editActionMode = null;
+  activeEditSelection = null;
+  editActionMessage = "";
+}
+
+function getManualSwapHelperText() {
+  if (editActionMessage) return editActionMessage;
+  if (editActionMode === "cross_team_swap") {
+    return activeEditSelection ? "Choose a player from the opposite team." : "Choose the first player to change.";
+  }
+  if (editActionMode === "same_team_swap") {
+    return activeEditSelection ? "Choose another player from the same team." : "Choose the first player to swap.";
+  }
+  return "Swap positions within a team, or shift players between teams.";
+}
+
+function handleManualSwapSelection(selection) {
+  if (!editActionMode || !state.currentTeams || !selection?.teamKey || !Number.isInteger(Number(selection.slotIndex))) return;
+  const nextSelection = {
+    teamKey: selection.teamKey,
+    slotIndex: Number(selection.slotIndex),
+    playerId: selection.playerId,
+    assignedPosition: selection.assignedPosition
+  };
+
+  if (!activeEditSelection) {
+    activeEditSelection = nextSelection;
+    editActionMessage = getSecondSelectionPrompt();
+    renderTeams();
+    return;
+  }
+
+  if (activeEditSelection.slotIndex === nextSelection.slotIndex && activeEditSelection.teamKey === nextSelection.teamKey) {
+    activeEditSelection = null;
+    editActionMessage = "Selection cleared. Choose the first player.";
+    renderTeams();
+    return;
+  }
+
+  if (editActionMode === "same_team_swap") {
+    if (!canSwapWithinSameTeam(activeEditSelection, nextSelection)) {
+      abortInvalidManualSwap("Swap Position works within the same team only");
+      return;
+    }
+
+    const swapResult = swapPlayersWithinTeam(activeEditSelection, nextSelection);
+    completeManualSwap(swapResult);
+    return;
+  }
+
+  if (!canSwapAcrossTeams(activeEditSelection, nextSelection)) {
+    abortInvalidManualSwap("Team Shift works between opposite teams only");
+    return;
+  }
+
+  const swapResult = swapPlayersAcrossTeams(activeEditSelection, nextSelection);
+  completeManualSwap(swapResult);
+}
+
+function getSecondSelectionPrompt() {
+  return editActionMode === "cross_team_swap"
+    ? "Choose a player from the opposite team."
+    : "Choose another player from the same team.";
+}
+
+function abortInvalidManualSwap(message) {
+  editActionMessage = message;
+  renderTeams();
+}
+
+function completeManualSwap(swapResult) {
+  activeEditSelection = null;
+  editActionMessage = swapResult.message;
+  if (swapResult.ok) {
+    markPendingMatchEdits();
+    logActivity(editActionMode === "cross_team_swap" ? "manual_team_shift" : "manual_position_swap", "match", state.currentTeams.id, {});
+  }
+  renderTeams();
+}
+
+function swapPlayersWithinTeam(fromSelection, toSelection) {
+  if (!canSwapWithinSameTeam(fromSelection, toSelection)) {
+    return { ok: false, message: "Swap Position works within the same team only" };
+  }
+
+  let result = { ok: false, message: "Could not swap those positions." };
+
+  updateTeams((teams) => {
+    const teamKey = fromSelection.teamKey === "a" ? "teamA" : "teamB";
+    const teamPlayers = teams[teamKey] || [];
+    const fromPlayer = teamPlayers.find((player) => player.id === fromSelection.playerId);
+    const toPlayer = teamPlayers.find((player) => player.id === toSelection.playerId);
+
+    if (!fromPlayer || !toPlayer) {
+      result = { ok: false, message: "Both swap positions must be occupied." };
+      return teams;
+    }
+
+    const nextPlayers = teamPlayers.map((player) => {
+      if (player.id === fromPlayer.id) return markManualSwap(player, toSelection);
+      if (player.id === toPlayer.id) return markManualSwap(player, fromSelection);
+      return player;
+    });
+    const validation = validateLineupsAfterManualSwap([teamPlayers], [nextPlayers]);
+    if (!validation.ok) {
+      result = validation;
+      return teams;
+    }
+
+    result = { ok: true, message: "Positions swapped." };
+    return {
+      ...teams,
+      [teamKey]: nextPlayers
+    };
+  });
+
+  return result;
+}
+
+function swapPlayersAcrossTeams(firstSelection, secondSelection) {
+  if (!canSwapAcrossTeams(firstSelection, secondSelection)) {
+    return { ok: false, message: "Team Shift works between opposite teams only" };
+  }
+
+  let result = { ok: false, message: "Could not shift those players." };
+
+  updateTeams((teams) => {
+    const firstTeamKey = firstSelection.teamKey === "a" ? "teamA" : "teamB";
+    const secondTeamKey = secondSelection.teamKey === "a" ? "teamA" : "teamB";
+    const firstTeamPlayers = teams[firstTeamKey] || [];
+    const secondTeamPlayers = teams[secondTeamKey] || [];
+    const firstLineup = getRenderedTeamLineup(teams, firstSelection.teamKey);
+    const secondLineup = getRenderedTeamLineup(teams, secondSelection.teamKey);
+    const firstSlot = firstLineup.find((slot) => slot.slotIndex === firstSelection.slotIndex);
+    const secondSlot = secondLineup.find((slot) => slot.slotIndex === secondSelection.slotIndex);
+
+    if (!firstSlot?.player || !secondSlot?.player) {
+      result = { ok: false, message: "Both Team Shift slots must be occupied." };
+      return teams;
+    }
+
+    if (firstSlot.player.id !== firstSelection.playerId || secondSlot.player.id !== secondSelection.playerId) {
+      result = { ok: false, message: "Team Shift selection is out of date. Try again." };
+      return teams;
+    }
+
+    const nextFirstLineup = cloneLineup(firstLineup);
+    const nextSecondLineup = cloneLineup(secondLineup);
+    const nextFirstSlot = nextFirstLineup.find((slot) => slot.slotIndex === firstSelection.slotIndex);
+    const nextSecondSlot = nextSecondLineup.find((slot) => slot.slotIndex === secondSelection.slotIndex);
+    const shiftedFirstPlayer = markManualShift(nextSecondSlot.player, nextFirstSlot);
+    const shiftedSecondPlayer = markManualShift(nextFirstSlot.player, nextSecondSlot);
+
+    nextFirstSlot.player = shiftedFirstPlayer;
+    nextSecondSlot.player = shiftedSecondPlayer;
+
+    const nextFirstTeamPlayers = syncTeamPlayersFromLineup(nextFirstLineup);
+    const nextSecondTeamPlayers = syncTeamPlayersFromLineup(nextSecondLineup);
+    const validation = validateLineupsAfterManualSwap(
+      [firstTeamPlayers, secondTeamPlayers],
+      [nextFirstTeamPlayers, nextSecondTeamPlayers]
+    );
+
+    if (!validation.ok) {
+      result = validation;
+      return teams;
+    }
+
+    const renderValidation = validateRenderedLineupsAfterManualSwap(
+      {
+        ...teams,
+        [firstTeamKey]: nextFirstTeamPlayers,
+        [secondTeamKey]: nextSecondTeamPlayers
+      },
+      [firstSelection.teamKey, secondSelection.teamKey]
+    );
+
+    if (!renderValidation.ok) {
+      result = renderValidation;
+      return teams;
+    }
+
+    result = { ok: true, message: "Players shifted." };
+    return {
+      ...teams,
+      [firstTeamKey]: nextFirstTeamPlayers,
+      [secondTeamKey]: nextSecondTeamPlayers
+    };
+  });
+
+  return result;
+}
+
+function getRenderedTeamLineup(teams, teamKey) {
+  const players = teamKey === "a" ? teams.teamA : teams.teamB;
+  const formation = teamKey === "a" ? teams.formationA || teams.formation : teams.formationB || teams.formation;
+  const teamSide = teamKey === "a" ? "A" : "B";
+
+  return generateLineupPositions(players || [], formation, teamSide, teams)
+    .map((slot) => ({
+      slotIndex: slot.slotIndex,
+      position: slot.assignedPosition,
+      player: slot.player
+    }))
+    .sort((a, b) => a.slotIndex - b.slotIndex);
+}
+
+function cloneLineup(lineup) {
+  return lineup.map((slot) => ({
+    ...slot,
+    player: { ...slot.player }
+  }));
+}
+
+function syncTeamPlayersFromLineup(lineup) {
+  return lineup
+    .sort((a, b) => a.slotIndex - b.slotIndex)
+    .map((slot) => slot.player);
+}
+
+function markManualShift(player, targetSlot) {
+  return {
+    ...player,
+    assignedPosition: targetSlot.position,
+    assignedSlotIndex: targetSlot.slotIndex,
+    assignmentType: "manual_shift"
+  };
+}
+
+function canSwapWithinSameTeam(firstSelection, secondSelection) {
+  return Boolean(firstSelection?.teamKey && firstSelection.teamKey === secondSelection?.teamKey);
+}
+
+function canSwapAcrossTeams(firstSelection, secondSelection) {
+  return Boolean(firstSelection?.teamKey && secondSelection?.teamKey && firstSelection.teamKey !== secondSelection.teamKey);
+}
+
+function validateLineupsAfterManualSwap(previousLineups, nextLineups) {
+  if (previousLineups.length !== nextLineups.length) {
+    return { ok: false, message: "Swap rejected to preserve lineup shape." };
+  }
+
+  for (let index = 0; index < previousLineups.length; index += 1) {
+    if (previousLineups[index].length !== nextLineups[index].length) {
+      return { ok: false, message: "Swap rejected to preserve team size." };
+    }
+
+    if (nextLineups[index].some((player) => !player?.id)) {
+      return { ok: false, message: "Swap rejected to prevent empty slots." };
+    }
+  }
+
+  const previousIds = previousLineups.flat().map((player) => player.id).sort();
+  const nextIds = nextLineups.flat().map((player) => player.id).sort();
+  const hasLostPlayer = previousIds.length !== nextIds.length || previousIds.some((id, index) => id !== nextIds[index]);
+  if (hasLostPlayer) {
+    return { ok: false, message: "Swap rejected to prevent player loss." };
+  }
+
+  if (new Set(nextIds).size !== nextIds.length) {
+    return { ok: false, message: "Swap rejected to prevent duplicate players." };
+  }
+
+  return { ok: true };
+}
+
+function validateRenderedLineupsAfterManualSwap(teams, teamKeys) {
+  const renderedLineups = teamKeys.map((teamKey) => getRenderedTeamLineup(teams, teamKey));
+  const expectedLineups = teamKeys.map((teamKey) => teamKey === "a" ? teams.teamA : teams.teamB);
+
+  for (let index = 0; index < renderedLineups.length; index += 1) {
+    if (renderedLineups[index].length !== expectedLineups[index].length) {
+      return { ok: false, message: "Team Shift rejected to prevent empty pitch slots." };
+    }
+
+    if (renderedLineups[index].some((slot) => !slot.player?.id)) {
+      return { ok: false, message: "Team Shift rejected to prevent missing players." };
+    }
+  }
+
+  const renderedIds = renderedLineups.flat().map((slot) => slot.player.id).sort();
+  const expectedIds = expectedLineups.flat().map((player) => player.id).sort();
+  const hasMismatch = renderedIds.length !== expectedIds.length || renderedIds.some((id, index) => id !== expectedIds[index]);
+  if (hasMismatch) {
+    return { ok: false, message: "Team Shift rejected to keep both lineups complete." };
+  }
+
+  if (new Set(renderedIds).size !== renderedIds.length) {
+    return { ok: false, message: "Team Shift rejected to prevent duplicate players." };
+  }
+
+  return { ok: true };
+}
+
+function markManualSwap(player, targetSelection) {
+  return {
+    ...player,
+    assignedPosition: targetSelection.assignedPosition,
+    assignedSlotIndex: targetSelection.slotIndex,
+    assignmentType: "manual_swap"
+  };
+}
+
+function handleTeamNameChange(teamKey, value) {
+  if (!state.currentTeams || !teamKey) return;
+  const fallbackName = teamKey === "a" ? "Team A" : "Team B";
+  const nextName = String(value || "").trim() || fallbackName;
+  const teamKeyName = teamKey === "a" ? "teamAName" : "teamBName";
+  if (state.currentTeams[teamKeyName] === nextName) return;
+  updateTeams((teams) => ({
+    ...teams,
+    [teamKeyName]: nextName
+  }));
+  markPendingMatchEdits();
+  renderTeams();
+}
+
+function handleCaptainChange(teamKey, playerId) {
+  if (!state.currentTeams || !teamKey || !playerId) return;
+  const teamPlayers = teamKey === "a" ? state.currentTeams.teamA : state.currentTeams.teamB;
+  if (!teamPlayers.some((player) => player.id === playerId)) return;
+  setCaptain(teamKey, playerId);
+  markPendingMatchEdits();
+  renderTeams();
+}
+
+export function handleMatchScheduleChange(matchTime) {
+  if (!state.currentTeams) {
+    renderHistory();
+    renderMatchSection();
+    return;
+  }
+
+  const settings = getMatchSettings(matchTime);
+  if (settings.ok) {
+    updateTeams((teams) => ({
+      ...teams,
+      matchTime: settings.matchTime,
+      startTime: settings.startTime,
+      endTime: settings.endTime
+    }));
+    markPendingMatchEdits();
+  }
+
+  renderHistory();
+  renderMatchSection();
+}
+
+function formatMatchWindow(match) {
+  return formatReadableMatchWindow(match);
+}
+
+function getHomeUpcomingMatches() {
+  const now = Date.now();
+  return state.data.matches
+      .filter((match) => matchStartTimeValue(match) > now && getMatchStatus(match, now) === "upcoming")
+      .sort((a, b) => matchStartTimeValue(a) - matchStartTimeValue(b));
+}
+
+export function renderNotifications() {
+  syncNotificationsWithMatches();
+  const notifications = getNotifications();
+  const unreadCount = notifications.filter((notification) => !notification.read).length;
+  els.notificationsCount.textContent = `${unreadCount}`;
+  els.notificationsToggle.classList.toggle("has-unread", unreadCount > 0);
+  els.notificationsPanel.classList.toggle("hidden", !notificationsOpen);
+  els.notificationsList.innerHTML = "";
+
+  if (!notifications.length) {
+    els.notificationsList.appendChild(emptyState("No notifications", "Pending results and updates will appear here."));
+    return;
+  }
+
+  notifications.forEach((notification) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = `notification-row${notification.read ? "" : " unread"}`;
+    row.innerHTML = `
+      <div>
+        <strong>${escapeHtml(notification.message)}</strong>
+        <p>${formatNotificationTimestamp(notification.createdAt)}</p>
+      </div>
+      <span class="pill">${escapeHtml(formatNotificationType(notification.type))}</span>
+    `;
+    row.addEventListener("click", () => handleNotificationOpen(notification));
+    els.notificationsList.appendChild(row);
+  });
+}
+
+export function toggleNotificationsPanel() {
+  notificationsOpen = !notificationsOpen;
+  renderNotifications();
+}
+
+export function closeNotificationsPanel() {
+  notificationsOpen = false;
+  renderNotifications();
+}
+
+function finishMatchEditing() {
+  if (!state.currentTeams) return;
+  const originalMatchId = editingMatchSnapshot?.id || state.currentTeams.id;
+  updateTeams((teams) => ({
+    ...teams,
+    id: originalMatchId,
+    status: "upcoming",
+    isDraft: false
+  }));
+  persistCurrentMatch({
+    forceSave: true,
+    status: "upcoming",
+    auditAction: "match_edited",
+    logAction: "match_edited"
+  });
+  editingMatchSnapshot = cloneMatchSnapshot(serializeCurrentMatch());
+  hasPendingMatchEdits = false;
+  isEditingMatch = false;
+  clearManualSwapSelection();
+  matchWizardStep = 3;
+  renderMatchSection();
+}
+
+export function openResultEditorForMatch(match) {
+  if (!canEditMatch(match)) {
+    alert("You do not have permission to edit this match.");
+    return;
+  }
+  restoreUpcomingMatch(match);
+  if (getMatchStatus(state.currentTeams) === "upcoming" || getMatchStatus(state.currentTeams) === "live") {
+    markCurrentMatchPendingResult();
+  }
+  if (!renderAndOpenResultPanel()) return;
+  switchTab("match");
+}
+
+function cancelMatchEditing() {
+  if (hasPendingMatchEdits && !confirm("Discard unsaved match edits?")) return;
+  if (editingMatchSnapshot) {
+    restoreUpcomingMatch(cloneMatchSnapshot(editingMatchSnapshot));
+  }
+  hasPendingMatchEdits = false;
+  isEditingMatch = false;
+  clearManualSwapSelection();
+  matchWizardStep = 3;
+  renderMatchSection();
+}
+
+function markPendingMatchEdits() {
+  if (!isEditingMatch) return;
+  hasPendingMatchEdits = true;
+}
+
+function cloneMatchSnapshot(match) {
+  if (!match) return null;
+  if (typeof structuredClone === "function") return structuredClone(match);
+  return JSON.parse(JSON.stringify(match));
+}
+
+function renderAndOpenResultPanel() {
+  const canOpen = openResultPanel();
+  if (!canOpen) return false;
+  render();
+  switchTab("match");
+  els.resultForm.scrollIntoView({ behavior: "smooth", block: "start" });
+  return true;
+}
+
+function promoteElapsedMatchesToPendingResult() {
+  const now = Date.now();
+  let changed = false;
+  const nextMatches = state.data.matches.map((match) => {
+    const computedStatus = getMatchStatus(match, now);
+    if (computedStatus !== "pending_result" || match.status === "pending_result" || match.result) return match;
+    changed = true;
+    return { ...match, status: "pending_result" };
+  });
+
+  if (!changed) return;
+  nextMatches.forEach((match) => {
+    if (match.status === "pending_result") {
+      addPendingResultNotificationIfMissing(match);
+    }
+  });
+  setMatches(nextMatches);
+  persist();
+}
+
+function addPendingResultNotificationIfMissing(match) {
+  const existing = getNotifications().some((notification) => notification.id === `pending-result-${match.id}`);
+  if (existing) return;
+  addNotification({
+    id: `pending-result-${match.id}`,
+    matchId: match.id,
+    type: "pending_result",
+    message: "Result pending",
+    read: false,
+    createdAt: new Date().toISOString()
+  });
+}
+
+function handleNotificationOpen(notification) {
+  if (notification.type === "player_approval_pending") {
+    updateNotificationRead(notification.id);
+    notificationsOpen = false;
+    switchTab("players");
+    render();
+    return;
+  }
+  markNotificationsReadForMatch(notification.matchId);
+  const match = state.data.matches.find((item) => item.id === notification.matchId);
+  notificationsOpen = false;
+  if (!match) {
+    renderNotifications();
+    return;
+  }
+  if (notification.type === "pending_result") {
+    openResultEditorForMatch(match);
+    return;
+  }
+  openMatchInViewMode(match, { switchTab: true });
+}
+
+function updateNotificationRead(notificationId) {
+  const notification = state.data.notifications.find((item) => item.id === notificationId);
+  if (!notification) return;
+  state.data.notifications = state.data.notifications.map((item) =>
+    item.id === notificationId ? { ...item, read: true } : item
+  );
+  persist();
+}
+
+function formatNotificationType(type) {
+  if (type === "pending_result") return "Pending";
+  if (type === "result_added") return "Saved";
+  if (type === "player_approval_pending") return "Approval";
+  return "Info";
+}
+
+function formatNotificationTimestamp(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(date);
+}
+
+function createUpcomingMatchCard(match, options = {}) {
+  const card = document.createElement("article");
+  card.className = `card match-upcoming-card${options.isNextMatch ? " next-match-card" : ""}`;
+  card.innerHTML = `
+    <div class="match-upcoming-copy">
+      ${options.isNextMatch ? '<span class="pill">Next Match</span>' : ""}
+      <strong>${escapeHtml(match.teamAName || "Team A")} vs ${escapeHtml(match.teamBName || "Team B")}</strong>
+      <p>${formatReadableMatchWindow(match)}</p>
+      <div class="audit-meta">
+        <span>Created by ${escapeHtml(formatAuditUser(match.createdBy, match.createdByName))}</span>
+        <span>Edited by ${escapeHtml(formatAuditUser(match.updatedBy || match.createdBy, match.updatedByName || match.createdByName))}</span>
+      </div>
+    </div>
+    <button class="secondary" type="button">View Match</button>
+  `;
+  card.querySelector("button").addEventListener("click", () => {
+    options.onView?.();
+  });
+  return card;
+}
+
+function hasFinishedAwaitingResult(match, status) {
+  return Boolean(match && status === "pending_result" && !match.result);
+}
+
+function refreshMatchStatusUI() {
+  if (!state.isReady) return;
+  promoteElapsedMatchesToPendingResult();
+  renderHome();
+  renderHistory();
+  renderNotifications();
+  if (state.currentTeams) {
+    renderMatchSection();
+  }
+}
+
+function getSelectedTimeValue(prefix) {
+  const hour = prefix === "start" ? els.matchStartHour.value : els.matchEndHour.value;
+  const minute = prefix === "start" ? els.matchStartMinute.value : els.matchEndMinute.value;
+  const period = prefix === "start" ? els.matchStartPeriod.value : els.matchEndPeriod.value;
+  return to24HourTime(hour, minute, period);
+}
+
+function to24HourTime(hour, minute, period) {
+  const safeHour = Number(hour) || 12;
+  const safeMinute = String(minute || "00").padStart(2, "0");
+  let hours24 = safeHour % 12;
+  if (period === "PM") hours24 += 12;
+  return `${String(hours24).padStart(2, "0")}:${safeMinute}`;
+}
+
+function resetMatchSetupState() {
+  isEditingMatch = false;
+  editingMatchSnapshot = null;
+  hasPendingMatchEdits = false;
+  clearManualSwapSelection();
+  clearMatchGuestPlayers();
+  clearTeams();
+  clearSelectedPlayerIds();
+  matchWizardStep = 0;
+  els.matchDate.value = "";
+  const defaultStart = getDefaultRoundedTime();
+  setTimeSelectorValues("start", defaultStart);
+  setTimeSelectorValues("end", addMinutesToTime(defaultStart, 60));
+  els.teamAScore.value = "0";
+  els.teamBScore.value = "0";
+  els.reshuffleTeams.disabled = true;
+  els.resultForm.classList.add("hidden");
+  els.matchFinishedModal.classList.add("hidden");
+  els.createMatch.classList.add("hidden");
+}
