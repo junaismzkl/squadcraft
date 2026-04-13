@@ -29,6 +29,13 @@ export function canManageRoles(profile = authState.currentProfile) {
   return isApprovedProfile(profile) && profile.role === "super_admin";
 }
 
+const MANAGEABLE_PROFILE_ROLES = ["user", "admin", "super_admin"];
+
+function resolveApprovalRole(selectedRole) {
+  if (!canManageRoles()) return "user";
+  return MANAGEABLE_PROFILE_ROLES.includes(selectedRole) ? selectedRole : "user";
+}
+
 export async function initAuth() {
   authState.isLoading = true;
   const { data, error } = await supabase.auth.getSession();
@@ -233,45 +240,77 @@ export async function loadPendingProfiles() {
   return authState.pendingProfiles;
 }
 
-export async function approveUserProfile(profileId) {
+export async function approveUserProfile(profileId, selectedRole = "user") {
   if (!canApproveUsers()) return { ok: false, message: "You do not have permission to approve users." };
   if (!authState.approvalSchemaReady) return { ok: false, message: "Approval columns are not available in Supabase yet." };
+  if (!profileId) return { ok: false, message: "Approval target id is missing." };
+
+  console.log("Approving pending profile.", { clickedProfileId: profileId, selectedRole });
+
+  const { data: pendingProfile, error: fetchError } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", profileId)
+    .maybeSingle();
+
+  if (fetchError) {
+    console.error("Failed to fetch pending profile before approval.", fetchError);
+    return { ok: false, message: approvalQueryErrorMessage(fetchError, "Could not approve user.") };
+  }
+
+  console.log("Fetched pending profile before approval.", { fetchedProfileId: pendingProfile?.id, selectedRole });
+
+  if (!pendingProfile) return { ok: false, message: "No matching profile found." };
+  if (pendingProfile.approval_status !== "pending") {
+    return { ok: false, message: "This user is no longer pending approval." };
+  }
 
   const now = new Date().toISOString();
   const approvalPatch = {
     approval_status: "approved",
     is_active: true,
     approved_by: authState.currentProfile.id,
-    approved_at: now
+    approved_at: now,
+    role: resolveApprovalRole(selectedRole)
   };
-  if (!canManageRoles()) approvalPatch.role = "user";
 
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from("profiles")
     .update(approvalPatch)
-    .eq("id", profileId)
-    .select("*")
-    .single();
+    .eq("id", profileId);
 
-  if (error) return { ok: false, message: error.message || "Could not approve user." };
+  if (error) {
+    console.error("Failed to approve pending profile.", error);
+    return { ok: false, message: approvalQueryErrorMessage(error, "Could not approve user.") };
+  }
+
   await loadPendingProfiles();
-  return { ok: true, profile: data };
+  return { ok: true, profile: { ...pendingProfile, ...approvalPatch } };
 }
 
 export async function updateUserRole(profileId, newRole) {
   if (!canManageRoles()) return { ok: false, message: "Only super admins can change roles." };
-  if (!["super_admin", "admin", "user"].includes(newRole)) return { ok: false, message: "Invalid role." };
+  if (!profileId) return { ok: false, message: "No pending user was selected." };
+  if (!MANAGEABLE_PROFILE_ROLES.includes(newRole)) return { ok: false, message: "Invalid role." };
 
   const { data, error } = await supabase
     .from("profiles")
     .update({ role: newRole })
     .eq("id", profileId)
-    .select("*")
-    .single();
+    .eq("approval_status", "pending")
+    .select("*");
 
-  if (error) return { ok: false, message: error.message || "Could not update role." };
+  if (error) {
+    console.error("Failed to update pending profile role.", error);
+    return { ok: false, message: approvalQueryErrorMessage(error, "Could not update role.") };
+  }
+
+  const updatedProfiles = data || [];
+  if (updatedProfiles.length === 0) return { ok: false, message: "No matching pending profile found." };
+  if (updatedProfiles.length > 1) return { ok: false, message: "More than one row matched approval query." };
+
   await loadPendingProfiles();
-  return { ok: true, profile: data };
+  return { ok: true, profile: updatedProfiles[0] };
 }
 
 async function createLegacyInactiveProfile(authUser, formData = {}) {
@@ -416,6 +455,17 @@ function isMissingAvatarSchemaError(error) {
 function isDuplicateProfileError(error) {
   const message = String(error?.message || "").toLowerCase();
   return error?.code === "23505" || message.includes("duplicate") || message.includes("already exists");
+}
+
+function approvalQueryErrorMessage(error, fallback) {
+  const message = String(error?.message || "").toLowerCase();
+  if (message.includes("multiple") || message.includes("more than one row")) {
+    return "More than one row matched approval query.";
+  }
+  if (message.includes("0 rows") || message.includes("no rows") || message.includes("single json object")) {
+    return "No matching pending profile found.";
+  }
+  return fallback;
 }
 
 export async function loadCurrentProfile(userId = authState.currentAuthUser?.id) {

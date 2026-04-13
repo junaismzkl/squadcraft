@@ -937,6 +937,7 @@ function renderPendingUsersAdminSection() {
   authState.pendingProfiles.forEach((profile) => {
     const row = document.createElement("article");
     row.className = "pending-user-row";
+    row.dataset.profileId = profile.id || "";
     row.innerHTML = `
       <div>
         <strong>${escapeHtml(profile.name || "Unnamed user")}</strong>
@@ -944,23 +945,27 @@ function renderPendingUsersAdminSection() {
       </div>
       <div class="row-actions pending-user-actions">
         ${canManageRoles() ? `
-          <select data-user-role>
+          <select data-user-role data-profile-id="${escapeHtml(profile.id || "")}">
             <option value="user" ${profile.role === "user" ? "selected" : ""}>User</option>
             <option value="admin" ${profile.role === "admin" ? "selected" : ""}>Admin</option>
             <option value="super_admin" ${profile.role === "super_admin" ? "selected" : ""}>Super Admin</option>
           </select>
         ` : ""}
-        <button class="icon-button" type="button" data-user-approve>Approve</button>
+        <button class="icon-button" type="button" data-user-approve data-profile-id="${escapeHtml(profile.id || "")}">Approve</button>
       </div>
     `;
 
-    row.querySelector("[data-user-approve]").addEventListener("click", async () => {
-      const result = await approveUserProfile(profile.id);
+    row.querySelector("[data-user-approve]").addEventListener("click", async (event) => {
+      const targetProfileId = event.currentTarget.dataset.profileId || row.dataset.profileId || "";
+      const selectedRole = row.querySelector("[data-user-role]")?.value || profile.role || "user";
+      console.log("Pending user approve clicked.", { clickedProfileId: targetProfileId, selectedRole });
+      const result = await approveUserProfile(targetProfileId, selectedRole);
       if (!result.ok) alert(result.message);
       render();
     });
     row.querySelector("[data-user-role]")?.addEventListener("change", async (event) => {
-      const result = await updateUserRole(profile.id, event.target.value);
+      const targetProfileId = event.currentTarget.dataset.profileId || row.dataset.profileId || "";
+      const result = await updateUserRole(targetProfileId, event.target.value);
       if (!result.ok) alert(result.message);
       render();
     });
