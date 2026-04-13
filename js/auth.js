@@ -85,7 +85,8 @@ export async function createAccountWithEmailPassword({ email, password, name }) 
     email,
     password,
     options: {
-      data: { name: name || "" }
+      data: { name: name || "" },
+      emailRedirectTo: "https://squadcraft.pages.dev"
     }
   });
 
