@@ -88,6 +88,7 @@ export const state = {
     notifications: [],
     users: [],
     currentUserId: DEFAULT_USERS[0].id,
+    authProfileId: "",
     activityLog: []
   },
   selectedPlayerIds: new Set(),
@@ -229,11 +230,49 @@ export function setUsers(users) {
 }
 
 export function setCurrentUser(userId) {
+  if (state.data.authProfileId) return;
   const nextUser = state.data.users.find((user) => user.id === userId && user.isActive);
   if (!nextUser) return;
   state.data = {
     ...state.data,
     currentUserId: nextUser.id
+  };
+  persist();
+}
+
+export function setAuthenticatedProfile(profile) {
+  if (!profile?.id) return;
+  const role = Object.values(USER_ROLES).includes(profile.role) ? profile.role : USER_ROLES.USER;
+  const authUser = normalizeUser({
+    id: profile.id,
+    name: profile.name || "Supabase User",
+    role,
+    isActive: profile.is_active !== false,
+    createdAt: profile.created_at || new Date().toISOString()
+  });
+  const users = normalizeUsers([
+    ...state.data.users.filter((user) => user.id !== authUser.id),
+    authUser
+  ]);
+
+  state.data = {
+    ...state.data,
+    users,
+    currentUserId: authUser.id,
+    authProfileId: authUser.id
+  };
+  persist();
+}
+
+export function clearAuthenticatedProfile() {
+  if (!state.data.authProfileId) return;
+  const fallbackUserId = state.data.users.find((user) => user.id === DEFAULT_USERS[0].id)?.id
+    || state.data.users[0]?.id
+    || DEFAULT_USERS[0].id;
+  state.data = {
+    ...state.data,
+    authProfileId: "",
+    currentUserId: fallbackUserId
   };
   persist();
 }
@@ -252,6 +291,7 @@ export function getCurrentUser() {
 
 export function hasPermission(permissionKey, user = getCurrentUser()) {
   if (!permissionKey || !user?.role) return false;
+  if (user.isActive === false) return false;
   return Boolean(PERMISSIONS[user.role]?.[permissionKey]);
 }
 
@@ -381,6 +421,7 @@ function loadStateData() {
     notifications: [],
     users: seedDefaultUsers(),
     currentUserId: DEFAULT_USERS[0].id,
+    authProfileId: "",
     activityLog: []
   };
   const saved = loadMatches();
@@ -393,10 +434,12 @@ function loadStateData() {
   saved.currentUserId = saved.users.some((user) => user.id === saved.currentUserId)
     ? saved.currentUserId
     : saved.users[0]?.id || DEFAULT_USERS[0].id;
+  saved.authProfileId = "";
   state.data = {
     ...state.data,
     users: saved.users,
-    currentUserId: saved.currentUserId
+    currentUserId: saved.currentUserId,
+    authProfileId: ""
   };
   saved.players = sanitizePermanentPlayers(saved.players);
 
@@ -418,7 +461,8 @@ export function initState() {
   const data = loadStateData();
   state.data = {
     ...state.data,
-    currentUserId: data.currentUserId
+    currentUserId: data.currentUserId,
+    authProfileId: ""
   };
   setUsers(data.users);
   setPlayers(data.players);
@@ -441,6 +485,7 @@ export function persist() {
     notifications: [...(state.data.notifications || [])],
     users: normalizeUsers(state.data.users),
     currentUserId: state.data.currentUserId || DEFAULT_USERS[0].id,
+    authProfileId: state.data.authProfileId || "",
     activityLog: [...(state.data.activityLog || [])]
   });
 }

@@ -1,6 +1,8 @@
 import { els } from "./dom.js";
+import { authState, createAccountWithEmailPassword, saveCurrentProfile, signInWithEmailPassword, signOutCurrentUser } from "./auth.js";
 import { generateTeams, getMatchSettings, toggleSelectAllPlayers } from "./match.js";
 import { addScorerRow, openResultPanel, saveMatchResult, updateScoreFromScorers } from "./result.js";
+import { readFileAsDataUrl, resizeImageDataUrl } from "./utils.js";
 import {
   addQuickGuest,
   cancelMatchCreation,
@@ -14,6 +16,7 @@ import {
   handleMatchScheduleChange,
   clearManualSwapSelection,
   closeNotificationsPanel,
+  openUserManagement,
   render,
   renderHistory,
   renderMatchSection,
@@ -27,9 +30,24 @@ import {
   toggleGuestForm
 } from "./ui.js";
 
+let profileAvatarDraft = "";
+
 export function bindEvents() {
+  window.addEventListener("auth:changed", render);
   els.tabs.forEach((button) => button.addEventListener("click", () => switchTab(button.dataset.tab)));
   els.notificationsToggle.addEventListener("click", toggleNotificationsPanel);
+  els.accountMenuToggle?.addEventListener("click", toggleAccountMenu);
+  els.accountSignIn?.addEventListener("click", openSignInModal);
+  els.accountCreate?.addEventListener("click", openCreateAccountModal);
+  els.accountProfile?.addEventListener("click", openProfileSetupModal);
+  els.accountApprovals?.addEventListener("click", handleOpenApprovals);
+  els.authModalClose?.addEventListener("click", closeAuthModal);
+  els.authModal?.addEventListener("click", handleAuthModalBackdrop);
+  els.authSignInForm?.addEventListener("submit", handleAuthLogin);
+  els.authCreateForm?.addEventListener("submit", handleCreateAccount);
+  els.authProfileForm?.addEventListener("submit", handleProfileSave);
+  els.authProfileAvatar?.addEventListener("change", handleProfileAvatarChange);
+  els.authLogout?.addEventListener("click", handleAuthLogout);
   els.currentUserSelect?.addEventListener("change", (event) => changeCurrentUser(event.target.value));
   els.showPlayerForm.addEventListener("click", showPlayerForm);
   els.playerForm.addEventListener("submit", savePlayerFromForm);
@@ -82,6 +100,197 @@ export function bindEvents() {
   });
   document.addEventListener("click", handleDocumentClick);
   document.addEventListener("live-match:updated", handleLiveMatchUpdate);
+}
+
+function toggleAccountMenu() {
+  const isOpen = els.accountMenu.classList.toggle("hidden");
+  els.accountMenuToggle.setAttribute("aria-expanded", isOpen ? "false" : "true");
+}
+
+function openSignInModal() {
+  openAuthModal("sign_in");
+}
+
+function openCreateAccountModal() {
+  openAuthModal("create_account");
+}
+
+function openProfileSetupModal() {
+  openAuthModal("profile");
+}
+
+async function handleOpenApprovals() {
+  els.accountMenu.classList.add("hidden");
+  els.accountMenuToggle.setAttribute("aria-expanded", "false");
+  await openUserManagement();
+}
+
+function openAuthModal(mode) {
+  els.accountMenu.classList.add("hidden");
+  els.accountMenuToggle.setAttribute("aria-expanded", "false");
+  els.authModal.classList.remove("hidden");
+  els.authSignInForm.classList.toggle("hidden", mode !== "sign_in");
+  els.authCreateForm.classList.toggle("hidden", mode !== "create_account");
+  els.authProfileForm.classList.toggle("hidden", mode !== "profile");
+  els.authModalTitle.textContent = mode === "create_account" ? "Create Account" : mode === "profile" ? "Profile Setup" : "Sign In";
+  if (mode === "profile") {
+    populateProfileForm();
+  }
+}
+
+function closeAuthModal() {
+  els.authModal.classList.add("hidden");
+}
+
+function handleAuthModalBackdrop(event) {
+  if (event.target === els.authModal) closeAuthModal();
+}
+
+async function handleAuthLogin(event) {
+  event.preventDefault();
+  const email = els.authEmail.value.trim();
+  const password = els.authPassword.value;
+  if (!email || !password) return;
+
+  els.authLoginButton.disabled = true;
+  const result = await signInWithEmailPassword(email, password);
+  els.authLoginButton.disabled = false;
+
+  if (!result.ok) {
+    render();
+    return;
+  }
+
+  els.authPassword.value = "";
+  if (authState.currentProfile && authState.currentProfile.approval_status !== "approved") closeAuthModal();
+  else if (!authState.currentProfile?.name) openAuthModal("profile");
+  else closeAuthModal();
+  render();
+}
+
+async function handleCreateAccount(event) {
+  event.preventDefault();
+  const name = els.authCreateName.value.trim();
+  const email = els.authCreateEmail.value.trim();
+  const password = els.authCreatePassword.value;
+  const confirmPassword = els.authCreateConfirm.value;
+
+  if (!email || !password) return;
+  if (password !== confirmPassword) {
+    els.authMessage.textContent = "Passwords do not match.";
+    return;
+  }
+
+  els.authCreateButton.disabled = true;
+  const result = await createAccountWithEmailPassword({ email, password, name });
+  els.authCreateButton.disabled = false;
+  els.authMessage.textContent = result.message || "";
+
+  if (!result.ok) {
+    render();
+    return;
+  }
+
+  els.authCreatePassword.value = "";
+  els.authCreateConfirm.value = "";
+  closeAuthModal();
+  render();
+}
+
+async function handleProfileSave(event) {
+  event.preventDefault();
+  const name = els.authProfileName.value.trim();
+  if (!name) {
+    setProfileMessage("Name is required.", true);
+    return;
+  }
+
+  els.authProfileSave.disabled = true;
+  const profilePayload = { name };
+  const avatarUrl = profileAvatarDraft || authState.currentProfile?.avatar_url || "";
+  if (avatarUrl) profilePayload.avatarUrl = avatarUrl;
+  const result = await saveCurrentProfile(profilePayload);
+  els.authProfileSave.disabled = false;
+
+  if (!result.ok) {
+    render();
+    setProfileMessage(result.message || "Could not save profile.", true);
+    return;
+  }
+  profileAvatarDraft = result.profile?.avatar_url || profileAvatarDraft;
+  render();
+  populateProfileForm();
+  setProfileMessage(result.message || "Profile saved.");
+}
+
+async function handleProfileAvatarChange(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  if (!file.type.startsWith("image/")) {
+    setProfileMessage("Choose an image file.", true);
+    event.target.value = "";
+    return;
+  }
+  if (file.size > 3 * 1024 * 1024) {
+    setProfileMessage("Choose an image under 3 MB.", true);
+    event.target.value = "";
+    return;
+  }
+
+  const dataUrl = await readFileAsDataUrl(file);
+  const resized = dataUrl ? await resizeImageDataUrl(dataUrl) : "";
+  if (!resized) {
+    setProfileMessage("That image could not be read. Please try another photo.", true);
+    event.target.value = "";
+    return;
+  }
+
+  profileAvatarDraft = resized;
+  if (els.authProfileAvatarPreview) {
+    els.authProfileAvatarPreview.src = resized;
+  }
+  setProfileMessage("Profile image ready to save.");
+}
+
+function populateProfileForm() {
+  const profile = authState.currentProfile || {};
+  const email = authState.currentAuthUser?.email || "";
+  profileAvatarDraft = profile.avatar_url || "";
+
+  if (els.authProfileName) els.authProfileName.value = profile.name || "";
+  if (els.authProfileEmail) els.authProfileEmail.textContent = email || "Signed in";
+  if (els.authProfileRole) els.authProfileRole.textContent = formatRoleLabel(profile.role || "user");
+  if (els.authProfileAvatar) els.authProfileAvatar.value = "";
+  if (els.authProfileAvatarPreview) {
+    els.authProfileAvatarPreview.src = profileAvatarDraft || createProfilePlaceholder(profile.name || email || "User");
+  }
+  setProfileMessage("Role is controlled by admins. New accounts use User access.");
+}
+
+function setProfileMessage(message, isError = false) {
+  if (!els.authProfileMessage) return;
+  els.authProfileMessage.textContent = message;
+  els.authProfileMessage.classList.toggle("error", isError);
+}
+
+function formatRoleLabel(role) {
+  return String(role || "user")
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function createProfilePlaceholder(name) {
+  const initial = encodeURIComponent(String(name || "U").trim().charAt(0).toUpperCase() || "U");
+  return `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' rx='48' fill='%23111827'/%3E%3Ccircle cx='48' cy='48' r='45' fill='none' stroke='%23d6bf74' stroke-width='3'/%3E%3Ctext x='48' y='59' text-anchor='middle' font-size='34' font-family='Arial,sans-serif' font-weight='700' fill='%23d6bf74'%3E${initial}%3C/text%3E%3C/svg%3E`;
+}
+
+async function handleAuthLogout() {
+  els.authLogout.disabled = true;
+  await signOutCurrentUser();
+  els.authLogout.disabled = false;
+  els.accountMenu.classList.add("hidden");
+  render();
 }
 
 let pendingForcedGeneration = null;
@@ -137,6 +346,13 @@ function handleLiveMatchUpdate() {
 }
 
 function handleDocumentClick(event) {
+  if (!els.accountMenu?.classList.contains("hidden")) {
+    const isAccountClick = els.accountMenu.contains(event.target) || els.accountMenuToggle.contains(event.target);
+    if (!isAccountClick) {
+      els.accountMenu.classList.add("hidden");
+      els.accountMenuToggle.setAttribute("aria-expanded", "false");
+    }
+  }
   if (els.notificationsPanel.classList.contains("hidden")) return;
   if (els.notificationsPanel.contains(event.target) || els.notificationsToggle.contains(event.target)) return;
   closeNotificationsPanel();

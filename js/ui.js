@@ -1,4 +1,5 @@
 import { els } from "./dom.js";
+import { approveUserProfile, authState, canApproveUsers, canManageRoles, isApprovedProfile, loadPendingProfiles, updateUserRole } from "./auth.js";
 import { generateLineupPositions } from "./formation.js";
 import { clearLiveTimer, renderLiveMatch } from "./liveMatch.js";
 import {
@@ -127,7 +128,9 @@ export function render() {
   if (!state.isReady) return;
   try {
     filterSelectedPlayerIds((id) => state.data.players.some((player) => player.id === id && player.approvalStatus === "approved"));
+    renderAuthState();
     renderCurrentUserSwitcher();
+    if (renderPendingApprovalView()) return;
     renderHome();
     renderPlayers();
     renderMatchSection();
@@ -215,8 +218,68 @@ export function switchTab(tabName) {
   els.panels.forEach((panel) => panel.classList.toggle("active", panel.id === `${tabName}-panel`));
 }
 
+function renderAuthState() {
+  const profile = authState.currentProfile;
+  const hasSession = Boolean(authState.isAuthenticated);
+  const hasProfile = Boolean(profile);
+
+  if (els.accountMenuUser) {
+    const roleLabel = profile?.role ? ` - ${formatRoleLabel(profile.role)}` : "";
+    els.accountMenuUser.textContent = hasSession
+      ? `${profile?.name || authState.currentAuthUser?.email || "Signed in"}${roleLabel}`
+      : "Account";
+  }
+
+  els.accountSignIn?.classList.toggle("hidden", hasSession);
+  els.accountCreate?.classList.toggle("hidden", hasSession);
+  els.accountProfile?.classList.toggle("hidden", !hasSession || !isApprovedProfile());
+  els.accountApprovals?.classList.toggle("hidden", !canApproveUsers());
+  els.authLogout?.classList.toggle("hidden", !hasSession);
+
+  if (els.authMessage) {
+    if (authState.error) {
+      els.authMessage.textContent = authState.error;
+    } else if (hasSession && !hasProfile) {
+      els.authMessage.textContent = "Signed in, but no profile row was found.";
+    } else {
+      els.authMessage.textContent = "";
+    }
+  }
+}
+
+function renderPendingApprovalView() {
+  const shouldGate = authState.isAuthenticated && !isApprovedProfile();
+  els.authGate?.classList.toggle("hidden", !shouldGate);
+  els.appMain?.classList.toggle("hidden", shouldGate);
+
+  if (!shouldGate) {
+    if (els.authGate) els.authGate.innerHTML = "";
+    return false;
+  }
+
+  const profile = authState.currentProfile;
+  const schemaWarning = !authState.approvalSchemaReady
+    ? " Approval columns are not available yet, so setup is running in compatibility mode."
+    : "";
+  els.authGate.innerHTML = `
+    <article class="auth-gate-card">
+      <p class="eyebrow">Account Pending</p>
+      <h2>Your account is waiting for admin approval.</h2>
+      <p>${profile ? `You can stay signed in, but protected app actions are locked until an admin approves your account.${schemaWarning}` : "Your account is signed in, but no profile row was found yet."}</p>
+      <button class="secondary compact-button" type="button" data-gate-logout>Log Out</button>
+    </article>
+  `;
+  els.authGate.querySelector("[data-gate-logout]").addEventListener("click", () => {
+    els.authLogout?.click();
+  });
+  return true;
+}
+
 function renderCurrentUserSwitcher() {
   if (!els.currentUserSelect) return;
+  const switcher = els.currentUserSelect.closest(".user-switcher");
+  switcher?.classList.toggle("hidden", Boolean(authState.isAuthenticated));
+  if (authState.isAuthenticated) return;
   const currentValue = els.currentUserSelect.value;
   const nextMarkup = state.data.users
     .filter((user) => user.isActive)
@@ -233,6 +296,14 @@ export function changeCurrentUser(userId) {
   isManagePlayersMode = false;
   resetPlayerForm();
   clearManualSwapSelection();
+  render();
+}
+
+export async function openUserManagement() {
+  if (!canApproveUsers()) return;
+  await loadPendingProfiles();
+  isManagePlayersMode = true;
+  switchTab("players");
   render();
 }
 
@@ -730,11 +801,12 @@ export function closeGuestForm() {
 export function renderPlayers() {
   const visiblePlayers = getVisiblePlayersForCurrentUser();
   const pendingPlayers = getPendingPlayersForAdmin();
+  const pendingUsersSection = renderPendingUsersAdminSection();
   els.playerCount.textContent = `${visiblePlayers.length} ${visiblePlayers.length === 1 ? "player" : "players"}`;
   els.playersList.innerHTML = "";
   renderPlayersToolbar();
   renderPendingApprovalNotice();
-  if (!visiblePlayers.length && !(isManagePlayersMode && pendingPlayers.length)) {
+  if (!visiblePlayers.length && !(isManagePlayersMode && pendingPlayers.length) && !pendingUsersSection) {
     els.playersList.appendChild(emptyState("No players yet", "Add permanent players to start building teams."));
     return;
   }
@@ -750,6 +822,8 @@ export function renderPlayers() {
   if (isManagePlayersMode && pendingPlayers.length) {
     els.playersList.appendChild(renderPendingApprovalSection(pendingPlayers));
   }
+
+  if (pendingUsersSection) els.playersList.appendChild(pendingUsersSection);
 }
 
 function renderPlayersToolbar() {
@@ -831,6 +905,66 @@ function renderPendingApprovalSection(pendingPlayers) {
     card.querySelector('[data-action="delete"]')?.addEventListener("click", () => deletePlayer(player.id));
     card.querySelector('[data-action="approve"]')?.addEventListener("click", () => approvePlayer(player.id));
     grid.appendChild(card);
+  });
+
+  return section;
+}
+
+function renderPendingUsersAdminSection() {
+  if (!canApproveUsers() || !isManagePlayersMode) return null;
+
+  const section = document.createElement("section");
+  section.className = "pending-approval-section";
+  section.innerHTML = `
+    <div class="history-section-header">
+      <h3>Pending Users</h3>
+      <span class="pill">${authState.pendingProfiles.length} pending</span>
+    </div>
+    <div class="pending-user-list"></div>
+  `;
+
+  const list = section.querySelector(".pending-user-list");
+  if (!authState.approvalSchemaReady) {
+    list.appendChild(emptyState("Approval setup needed", "Add approval_status, approved_by, and approved_at to profiles, then refresh Supabase schema cache."));
+    return section;
+  }
+
+  if (!authState.pendingProfiles.length) {
+    list.appendChild(emptyState("No pending users", "New account requests will appear here after signup."));
+    return section;
+  }
+
+  authState.pendingProfiles.forEach((profile) => {
+    const row = document.createElement("article");
+    row.className = "pending-user-row";
+    row.innerHTML = `
+      <div>
+        <strong>${escapeHtml(profile.name || "Unnamed user")}</strong>
+        <span>${escapeHtml(profile.role || "user")} - ${escapeHtml(profile.approval_status || "pending")}</span>
+      </div>
+      <div class="row-actions pending-user-actions">
+        ${canManageRoles() ? `
+          <select data-user-role>
+            <option value="user" ${profile.role === "user" ? "selected" : ""}>User</option>
+            <option value="admin" ${profile.role === "admin" ? "selected" : ""}>Admin</option>
+            <option value="super_admin" ${profile.role === "super_admin" ? "selected" : ""}>Super Admin</option>
+          </select>
+        ` : ""}
+        <button class="icon-button" type="button" data-user-approve>Approve</button>
+      </div>
+    `;
+
+    row.querySelector("[data-user-approve]").addEventListener("click", async () => {
+      const result = await approveUserProfile(profile.id);
+      if (!result.ok) alert(result.message);
+      render();
+    });
+    row.querySelector("[data-user-role]")?.addEventListener("change", async (event) => {
+      const result = await updateUserRole(profile.id, event.target.value);
+      if (!result.ok) alert(result.message);
+      render();
+    });
+    list.appendChild(row);
   });
 
   return section;

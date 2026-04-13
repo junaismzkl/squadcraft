@@ -25,12 +25,14 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: var(--ink);
   background: radial-gradient(circle at top, #1a2230 0%, #111827 38%, #0f1720 100%);
   position: relative;
+  overflow-x: hidden;
 }
 
 body::before {
@@ -63,8 +65,10 @@ button:disabled {
 
 .app-shell {
   width: min(100%, 1100px);
+  min-height: 100dvh;
   margin: 0 auto;
   padding: 24px 18px calc(132px + env(safe-area-inset-bottom, 0px));
+  overflow-x: clip;
 }
 
 main {
@@ -241,6 +245,153 @@ main {
   align-items: center;
   gap: 10px;
   min-width: 0;
+}
+
+.account-menu-wrap {
+  position: relative;
+}
+
+.account-menu-button {
+  display: inline-grid;
+  gap: 4px;
+  place-content: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 213, 74, 0.25);
+  border-radius: 12px;
+  box-shadow: 0 0 8px rgba(255, 213, 74, 0.15);
+}
+
+.account-menu-button span {
+  display: block;
+  width: 18px;
+  height: 2px;
+  background: #ffd54a;
+  border-radius: 999px;
+}
+
+.account-menu {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 60;
+  display: grid;
+  gap: 8px;
+  width: min(260px, calc(100vw - 24px));
+  min-width: min(210px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  padding: 12px;
+  background: rgba(17, 24, 39, 0.94);
+  border: 1px solid rgba(214, 191, 116, 0.16);
+  border-radius: 14px;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.36);
+  backdrop-filter: blur(16px);
+  overflow-wrap: anywhere;
+}
+
+.account-menu-user,
+.auth-message {
+  color: rgba(226, 232, 240, 0.72);
+  font-size: 0.76rem;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.account-menu-user {
+  color: #f5d76e;
+}
+
+.account-menu-item {
+  min-height: 36px;
+  padding: 8px 10px;
+  color: #f8f3df;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(214, 191, 116, 0.14);
+  border-radius: 8px;
+  font-weight: 800;
+  text-align: left;
+}
+
+.auth-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(15, 23, 32, 0.66);
+  backdrop-filter: blur(8px);
+}
+
+.auth-modal-card {
+  width: min(100%, 390px);
+  max-height: calc(100dvh - 36px);
+  overflow: auto;
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  background: rgba(17, 24, 39, 0.96);
+  border: 1px solid rgba(214, 191, 116, 0.16);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.42);
+}
+
+.auth-form {
+  display: grid;
+  gap: 12px;
+}
+
+.profile-editor-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background:
+    linear-gradient(135deg, rgba(214, 191, 116, 0.08), rgba(255, 255, 255, 0.018)),
+    rgba(15, 23, 32, 0.46);
+  border: 1px solid rgba(214, 191, 116, 0.13);
+  border-radius: 12px;
+}
+
+.profile-editor-avatar {
+  width: 66px;
+  height: 66px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid rgba(214, 191, 116, 0.5);
+  background: rgba(15, 23, 32, 0.88);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.24);
+}
+
+.profile-editor-summary .eyebrow {
+  margin-bottom: 4px;
+  font-size: 0.66rem;
+}
+
+.profile-editor-summary strong,
+.profile-editor-summary span {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.profile-editor-summary strong {
+  color: #f8fafc;
+  font-size: 0.9rem;
+}
+
+.profile-editor-summary span {
+  margin-top: 4px;
+  color: rgba(226, 232, 240, 0.68);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+#auth-profile-message.error {
+  color: #fca5a5;
 }
 
 .user-switcher {
@@ -761,6 +912,71 @@ main {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
+}
+
+.auth-gate {
+  display: grid;
+  place-items: center;
+  min-height: 52vh;
+}
+
+.auth-gate-card {
+  width: min(100%, 460px);
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+  background:
+    linear-gradient(135deg, rgba(214, 191, 116, 0.08), rgba(255, 255, 255, 0.02)),
+    rgba(17, 24, 39, 0.9);
+  border: 1px solid rgba(214, 191, 116, 0.16);
+  border-radius: 14px;
+  box-shadow: 0 22px 52px rgba(0, 0, 0, 0.32);
+}
+
+.auth-gate-card h2,
+.auth-gate-card p {
+  margin: 0;
+}
+
+.pending-user-list {
+  display: grid;
+  gap: 10px;
+}
+
+.pending-user-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  background: rgba(15, 23, 32, 0.44);
+  border: 1px solid rgba(214, 191, 116, 0.1);
+  border-radius: 10px;
+}
+
+.pending-user-row strong,
+.pending-user-row span {
+  display: block;
+}
+
+.pending-user-row span {
+  margin-top: 3px;
+  color: rgba(226, 232, 240, 0.62);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.pending-user-actions {
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.pending-user-actions select {
+  min-height: 32px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 0.78rem;
 }
 
 .match-upcoming-card {
@@ -2947,7 +3163,16 @@ select:focus {
     padding: 14px 12px;
   }
   .topbar-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
     gap: 6px;
+  }
+  .account-menu {
+    right: 0;
+    width: min(250px, calc(100vw - 24px));
+  }
+  .auth-message {
+    font-size: 0.68rem;
   }
   .user-switcher span {
     display: none;
@@ -2971,6 +3196,12 @@ select:focus {
   .footer-credit {
     font-size: 0.68rem;
     letter-spacing: 0.06em;
+  }
+  .pending-user-row {
+    grid-template-columns: 1fr;
+  }
+  .pending-user-actions {
+    justify-content: flex-start;
   }
   .match-detail-header {
     margin-bottom: 12px;

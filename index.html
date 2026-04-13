@@ -25,8 +25,59 @@
             </svg>
           </div>
         </button>
+        <div class="account-menu-wrap">
+          <button class="account-menu-button" id="account-menu-toggle" type="button" aria-label="Account menu" aria-expanded="false">
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
+          <div class="account-menu hidden" id="account-menu">
+            <div class="account-menu-user" id="account-menu-user"></div>
+            <button class="account-menu-item" id="account-sign-in" type="button">Sign In</button>
+            <button class="account-menu-item" id="account-create" type="button">Create Account</button>
+            <button class="account-menu-item hidden" id="account-profile" type="button">Profile</button>
+            <button class="account-menu-item hidden" id="account-approvals" type="button">Approvals</button>
+            <button class="account-menu-item hidden" id="auth-logout" type="button">Log Out</button>
+            <span class="auth-message" id="auth-message" role="status"></span>
+          </div>
+        </div>
       </div>
     </header>
+
+    <div class="auth-modal hidden" id="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title">
+      <div class="auth-modal-card">
+        <div class="inline-heading">
+          <h3 id="auth-modal-title">Sign In</h3>
+          <button class="ghost compact-button" id="auth-modal-close" type="button">Close</button>
+        </div>
+        <form class="auth-form" id="auth-sign-in-form">
+          <label>Email <input id="auth-email" type="email" autocomplete="email" required></label>
+          <label>Password <input id="auth-password" type="password" autocomplete="current-password" required></label>
+          <button class="primary" id="auth-login-button" type="submit">Sign In</button>
+        </form>
+        <form class="auth-form hidden" id="auth-create-form">
+          <label>Name <input id="auth-create-name" type="text" autocomplete="name"></label>
+          <label>Email <input id="auth-create-email" type="email" autocomplete="email" required></label>
+          <label>Password <input id="auth-create-password" type="password" autocomplete="new-password" required></label>
+          <label>Confirm Password <input id="auth-create-confirm" type="password" autocomplete="new-password" required></label>
+          <button class="primary" id="auth-create-button" type="submit">Create Account</button>
+        </form>
+        <form class="auth-form hidden" id="auth-profile-form">
+          <div class="profile-editor-summary">
+            <img class="profile-editor-avatar" id="auth-profile-avatar-preview" alt="Profile image preview">
+            <div>
+              <p class="eyebrow">Account</p>
+              <strong id="auth-profile-email">Signed in</strong>
+              <span id="auth-profile-role">User</span>
+            </div>
+          </div>
+          <label>Name <input id="auth-profile-name" type="text" autocomplete="name" required></label>
+          <label>Profile Image <input id="auth-profile-avatar" type="file" accept="image/*"></label>
+          <p class="helper" id="auth-profile-message">Role is controlled by admins. New accounts use User access.</p>
+          <button class="primary" id="auth-profile-save" type="submit">Save Profile</button>
+        </form>
+      </div>
+    </div>
 
     <div class="notifications-panel hidden" id="notifications-panel">
       <div class="notifications-card">
@@ -38,7 +89,9 @@
       </div>
     </div>
 
-    <main>
+    <section class="auth-gate hidden" id="auth-gate"></section>
+
+    <main id="app-main">
       <div class="bg-football ball-1"></div>
       <div class="bg-football ball-2"></div>
       <div class="bg-football ball-3"></div>
