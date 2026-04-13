@@ -244,14 +244,15 @@ export async function loadPendingProfiles() {
 export async function approveUserProfile(profileId, selectedRole = "user") {
   if (!canApproveUsers()) return { ok: false, message: "You do not have permission to approve users." };
   if (!authState.approvalSchemaReady) return { ok: false, message: "Approval columns are not available in Supabase yet." };
-  if (!profileId) return { ok: false, message: "Approval target id is missing." };
+  const targetProfileId = String(profileId || "").trim();
+  if (!targetProfileId) return { ok: false, message: "Approval target id is missing." };
 
-  console.log("Approving pending profile.", { clickedProfileId: profileId, selectedRole });
+  console.log("Approving pending profile.", { clickedProfileId: targetProfileId, selectedRole });
 
   const { data: pendingProfile, error: fetchError } = await supabase
     .from("profiles")
     .select("*")
-    .eq("id", profileId)
+    .eq("id", targetProfileId)
     .maybeSingle();
 
   if (fetchError) {
@@ -275,14 +276,22 @@ export async function approveUserProfile(profileId, selectedRole = "user") {
     role: resolveApprovalRole(selectedRole)
   };
 
-  const { error } = await supabase
+  const updateResult = await supabase
     .from("profiles")
     .update(approvalPatch)
-    .eq("id", profileId);
+    .eq("id", targetProfileId);
+  console.log("Pending profile approval update result.", {
+    clickedProfileId: targetProfileId,
+    fetchedProfileId: pendingProfile.id,
+    selectedRole,
+    data: updateResult.data,
+    error: updateResult.error,
+    status: updateResult.status
+  });
 
-  if (error) {
-    console.error("Failed to approve pending profile.", error);
-    return { ok: false, message: approvalQueryErrorMessage(error, "Could not approve user.") };
+  if (updateResult.error) {
+    console.error("Failed to approve pending profile.", updateResult.error);
+    return { ok: false, message: approvalQueryErrorMessage(updateResult.error, "Could not approve user.") };
   }
 
   await loadPendingProfiles();
@@ -291,7 +300,7 @@ export async function approveUserProfile(profileId, selectedRole = "user") {
 
 export async function updateUserRole(profileId, newRole) {
   if (!canManageRoles()) return { ok: false, message: "Only super admins can change roles." };
-  if (!profileId) return { ok: false, message: "No pending user was selected." };
+  if (!profileId) return { ok: false, message: "Approval target id is missing." };
   if (!MANAGEABLE_PROFILE_ROLES.includes(newRole)) return { ok: false, message: "Invalid role." };
 
   const { data, error } = await supabase
@@ -307,7 +316,7 @@ export async function updateUserRole(profileId, newRole) {
   }
 
   const updatedProfiles = data || [];
-  if (updatedProfiles.length === 0) return { ok: false, message: "No matching pending profile found." };
+  if (updatedProfiles.length === 0) return { ok: false, message: "No matching profile found." };
   if (updatedProfiles.length > 1) return { ok: false, message: "More than one row matched approval query." };
 
   await loadPendingProfiles();
@@ -464,7 +473,7 @@ function approvalQueryErrorMessage(error, fallback) {
     return "More than one row matched approval query.";
   }
   if (message.includes("0 rows") || message.includes("no rows") || message.includes("single json object")) {
-    return "No matching pending profile found.";
+    return "No matching profile found.";
   }
   return fallback;
 }
