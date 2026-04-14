@@ -1605,7 +1605,7 @@ function createHistoryCard(match) {
       ${match.managerName ? `<p>Manager: ${escapeHtml(match.managerName)}${managerHistoryTeam(match, teamAName, teamBName)}</p>` : ""}
       <div class="audit-meta">
         <span>Created by ${escapeHtml(metadata.createdByLabel)}</span>
-        <span>Last edited by ${escapeHtml(metadata.updatedByLabel)}</span>
+        ${metadata.hasBeenEdited ? `<span>Last edited by ${escapeHtml(metadata.updatedByLabel)}</span>` : ""}
       </div>
     </div>
     <div class="row-actions history-actions">
@@ -1703,10 +1703,10 @@ function formatReadableMatchWindow(match) {
   const start = new Date(matchStartTime(match));
   const end = new Date(matchEndTime(match));
   if (Number.isNaN(start.getTime())) return "Date not set";
-  const dateLabel = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(start);
-  const startLabel = new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(start);
+  const dateLabel = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", timeZone: "UTC" }).format(start);
+  const startLabel = new Intl.DateTimeFormat(undefined, { timeStyle: "short", timeZone: "UTC" }).format(start);
   if (Number.isNaN(end.getTime())) return `${dateLabel} \u2022 ${startLabel}`;
-  const endLabel = new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(end);
+  const endLabel = new Intl.DateTimeFormat(undefined, { timeStyle: "short", timeZone: "UTC" }).format(end);
   return `${dateLabel} \u2022 ${startLabel} \u2013 ${endLabel}`;
 }
 
@@ -1714,14 +1714,13 @@ function getScheduleFieldValues(match) {
   const start = new Date(match.startTime || match.matchTime || matchDateTime(match));
   const end = new Date(match.endTime || match.startTime || match.matchTime || matchDateTime(match));
   const matchDate = Number.isNaN(start.getTime()) ? "" : start.toISOString().slice(0, 10);
-  const startTime = Number.isNaN(start.getTime()) ? getDefaultRoundedTime() : toLocalTimeValue(start);
-  const endTime = Number.isNaN(end.getTime()) ? addMinutesToTime(startTime, 60) : toLocalTimeValue(end);
+  const startTime = Number.isNaN(start.getTime()) ? getDefaultRoundedTime() : toUtcTimeValue(start);
+  const endTime = Number.isNaN(end.getTime()) ? addMinutesToTime(startTime, 60) : toUtcTimeValue(end);
   return { matchDate, startTime, endTime };
 }
 
-function toLocalTimeValue(date) {
-  const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return offsetDate.toISOString().slice(11, 16);
+function toUtcTimeValue(date) {
+  return date.toISOString().slice(11, 16);
 }
 
 function initTimeSelectors() {
@@ -1941,7 +1940,9 @@ function renderStandardMatchView(teams, matchStatus, options = {}) {
 function renderMatchDetailHeader(match) {
   const card = document.createElement("article");
   card.className = "card match-detail-header";
-  const editHistory = Array.isArray(match.editHistory) ? match.editHistory.slice(-3).reverse() : [];
+  const editHistory = Array.isArray(match.editHistory)
+    ? match.editHistory.filter((entry) => entry?.action !== "match_created").slice(-3).reverse()
+    : [];
   const metadata = getMatchMetadata(match);
   card.innerHTML = `
     <div class="match-detail-copy">
@@ -1950,7 +1951,7 @@ function renderMatchDetailHeader(match) {
       <p>${formatReadableMatchWindow(match)}</p>
       <div class="audit-meta">
         <span>Created by ${escapeHtml(metadata.createdByLabel)}</span>
-        <span>Last edited by ${escapeHtml(metadata.updatedByLabel)}</span>
+        ${metadata.hasBeenEdited ? `<span>Last edited by ${escapeHtml(metadata.updatedByLabel)}</span>` : ""}
         ${editHistory.map((entry) => `<span>${escapeHtml(formatAuditAction(entry.action))} by ${escapeHtml(entry.byName || getUserName(entry.by))}</span>`).join("")}
       </div>
     </div>
@@ -2775,7 +2776,7 @@ function createUpcomingMatchCard(match, options = {}) {
       <p>${formatReadableMatchWindow(match)}</p>
       <div class="audit-meta">
         <span>Created by ${escapeHtml(metadata.createdByLabel)}</span>
-        <span>Edited by ${escapeHtml(metadata.updatedByLabel)}</span>
+        ${metadata.hasBeenEdited ? `<span>Edited by ${escapeHtml(metadata.updatedByLabel)}</span>` : ""}
       </div>
     </div>
     <button class="secondary" type="button">View Match</button>

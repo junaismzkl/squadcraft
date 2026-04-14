@@ -25,8 +25,7 @@ export function formatDate(value) {
 export function toDateTimeLocalValue(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return offsetDate.toISOString().slice(0, 16);
+  return date.toISOString().slice(0, 16);
 }
 
 export function escapeHtml(value) {

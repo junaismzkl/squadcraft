@@ -185,8 +185,8 @@ function buildMatchSchedule(matchTime) {
     return { ok: false, message: "Add a match date, start time, and end time." };
   }
 
-  const startTime = `${matchDate}T${startClock}`;
-  const endTime = `${matchDate}T${endClock}`;
+  const startTime = toFloatingDateTime(matchDate, startClock);
+  const endTime = toFloatingDateTime(matchDate, endClock);
   const startValue = new Date(startTime).getTime();
   const endValue = new Date(endTime).getTime();
 
@@ -199,6 +199,10 @@ function buildMatchSchedule(matchTime) {
   }
 
   return { ok: true, startTime, endTime };
+}
+
+function toFloatingDateTime(matchDate, clock) {
+  return `${matchDate}T${clock}:00Z`;
 }
 
 function isGoalkeeper(player) {

@@ -279,6 +279,13 @@ function resolvedUserName(userId, fallbackName = "") {
   return firstPresent(cleanResolvedName(fallbackName), cleanResolvedName(getUserById(userId)?.name));
 }
 
+function normalizeFloatingMatchDateTime(value) {
+  const rawValue = String(value || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(rawValue)) return `${rawValue}:00Z`;
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(rawValue)) return `${rawValue}Z`;
+  return rawValue;
+}
+
 export function normalizeMatchMetadata(match = {}) {
   const createdBy = firstPresent(
     match.createdBy,
@@ -304,8 +311,7 @@ export function normalizeMatchMetadata(match = {}) {
     match.editedBy,
     match.edited_by,
     match.editorId,
-    match.editor_id,
-    createdBy
+    match.editor_id
   );
   const updatedByName = resolvedUserName(updatedBy, firstPresent(
     match.updatedByName,
@@ -319,17 +325,20 @@ export function normalizeMatchMetadata(match = {}) {
     match.updatedByProfile?.name,
     match.updatedByProfile?.display_name,
     match.updated_by_profile?.name,
-    match.updated_by_profile?.display_name,
-    updatedBy === createdBy ? createdByName : ""
+    match.updated_by_profile?.display_name
   ));
+  const createdAt = firstPresent(match.createdAt, match.created_at, match.dateTime, match.date);
+  const updatedAt = firstPresent(match.updatedAt, match.updated_at, match.editedAt, match.edited_at);
+  const hasBeenEdited = hasRealMatchEdit(match, { createdAt, updatedAt, updatedBy });
 
   return {
     createdBy,
     createdByName,
-    createdAt: firstPresent(match.createdAt, match.created_at, match.dateTime, match.date),
+    createdAt,
     updatedBy,
     updatedByName,
-    updatedAt: firstPresent(match.updatedAt, match.updated_at, match.editedAt, match.edited_at)
+    updatedAt,
+    hasBeenEdited
   };
 }
 
@@ -338,8 +347,19 @@ export function getMatchMetadata(match = {}) {
   return {
     ...metadata,
     createdByLabel: resolvedUserName(metadata.createdBy, metadata.createdByName) || "Unknown",
-    updatedByLabel: resolvedUserName(metadata.updatedBy, metadata.updatedByName) || "Unknown"
+    updatedByLabel: metadata.hasBeenEdited
+      ? resolvedUserName(metadata.updatedBy, metadata.updatedByName) || "Unknown"
+      : ""
   };
+}
+
+function hasRealMatchEdit(match = {}, metadata = {}) {
+  const editHistory = Array.isArray(match.editHistory) ? match.editHistory : [];
+  if (editHistory.some((entry) => entry?.action && entry.action !== "match_created")) return true;
+  if (editHistory.some((entry) => entry?.action === "match_created")) return false;
+  if (!metadata.updatedBy && !metadata.updatedAt) return false;
+  if (!metadata.updatedAt || !metadata.createdAt) return Boolean(metadata.updatedBy);
+  return new Date(metadata.updatedAt).getTime() !== new Date(metadata.createdAt).getTime();
 }
 
 export function getCurrentUser() {
@@ -625,9 +645,9 @@ export function normalizeActivityLogEntry(entry) {
 export function normalizeStoredMatch(match) {
   const now = new Date().toISOString();
   const metadata = normalizeMatchMetadata(match);
-  match.dateTime = match.dateTime || match.date || new Date().toISOString();
-  match.startTime = match.startTime || match.dateTime;
-  match.endTime = match.endTime || match.dateTime;
+  match.dateTime = normalizeFloatingMatchDateTime(match.dateTime || match.date || new Date().toISOString());
+  match.startTime = normalizeFloatingMatchDateTime(match.startTime || match.dateTime);
+  match.endTime = normalizeFloatingMatchDateTime(match.endTime || match.dateTime);
   match.teamAPlayers = Array.isArray(match.teamAPlayers) ? match.teamAPlayers : match.teamA || [];
   match.teamBPlayers = Array.isArray(match.teamBPlayers) ? match.teamBPlayers : match.teamB || [];
   match.teamAPlayers = snapshotTeam(match.teamAPlayers);
@@ -663,9 +683,9 @@ export function normalizeStoredMatch(match) {
   match.createdBy = metadata.createdBy;
   match.createdByName = metadata.createdByName;
   match.createdAt = metadata.createdAt || match.dateTime || now;
-  match.updatedBy = metadata.updatedBy || match.createdBy;
-  match.updatedByName = metadata.updatedByName || (match.updatedBy === match.createdBy ? match.createdByName : "");
-  match.updatedAt = metadata.updatedAt || match.createdAt || now;
+  match.updatedBy = metadata.hasBeenEdited ? metadata.updatedBy : "";
+  match.updatedByName = metadata.hasBeenEdited ? metadata.updatedByName : "";
+  match.updatedAt = metadata.hasBeenEdited ? metadata.updatedAt : "";
   match.editHistory = Array.isArray(match.editHistory)
     ? match.editHistory.map(normalizeMatchEditHistoryEntry).filter(Boolean)
     : [];
@@ -933,14 +953,15 @@ export function persistCurrentMatch(overrides = {}) {
   const now = new Date().toISOString();
   const existingMetadata = normalizeMatchMetadata(existingMatch || {});
   const baseMetadata = normalizeMatchMetadata(baseMatch);
+  const isInitialCreate = !existingMatch && auditAction === "match_created";
   const match = {
     ...baseMatch,
     createdBy: existingMetadata.createdBy || baseMetadata.createdBy || user.id,
     createdByName: existingMetadata.createdByName || baseMetadata.createdByName || user.name,
     createdAt: existingMetadata.createdAt || baseMetadata.createdAt || now,
-    updatedBy: user.id,
-    updatedByName: user.name,
-    updatedAt: now,
+    updatedBy: isInitialCreate ? "" : user.id,
+    updatedByName: isInitialCreate ? "" : user.name,
+    updatedAt: isInitialCreate ? "" : now,
     editHistory: [
       ...(existingMatch?.editHistory || baseMatch.editHistory || []),
       ...(auditAction ? [{

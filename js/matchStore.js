@@ -241,7 +241,7 @@ function remoteMatchToLocal(matchRow, playerRows, profilesById = new Map()) {
   const teamAPlayers = playerRows.filter((row) => String(row.team || "").toUpperCase() === "A").map(remoteMatchPlayerToLocal);
   const teamBPlayers = playerRows.filter((row) => String(row.team || "").toUpperCase() === "B").map(remoteMatchPlayerToLocal);
   const createdBy = matchRow.created_by || matchRow.createdBy || "";
-  const updatedBy = matchRow.updated_by || matchRow.updatedBy || matchRow.edited_by || matchRow.editedBy || createdBy;
+  const updatedBy = matchRow.updated_by || matchRow.updatedBy || matchRow.edited_by || matchRow.editedBy || "";
   const createdByProfile = profilesById.get(createdBy);
   const updatedByProfile = profilesById.get(updatedBy);
   const metadata = normalizeMatchMetadata({
@@ -257,7 +257,7 @@ function remoteMatchToLocal(matchRow, playerRows, profilesById = new Map()) {
     title: matchRow.title || "",
     dateTime: matchRow.match_date || matchRow.created_at || new Date().toISOString(),
     startTime: matchRow.match_date || matchRow.created_at || new Date().toISOString(),
-    endTime: matchRow.match_date || matchRow.created_at || new Date().toISOString(),
+    endTime: addMinutesToDateTime(matchRow.match_date || matchRow.created_at, 60),
     location: matchRow.location || "",
     status: matchRow.status || "upcoming",
     teamAName,
@@ -274,13 +274,19 @@ function remoteMatchToLocal(matchRow, playerRows, profilesById = new Map()) {
     createdAt: matchRow.created_at || matchRow.match_date || new Date().toISOString(),
     updatedBy: metadata.updatedBy,
     updatedByName: metadata.updatedByName,
-    updatedAt: matchRow.updated_at || matchRow.created_at || new Date().toISOString(),
+    updatedAt: matchRow.updated_at || "",
     editHistory: []
   };
 }
 
 function getProfileName(profile) {
   return profile?.display_name || profile?.name || "";
+}
+
+function addMinutesToDateTime(value, minutes) {
+  const date = new Date(value || "");
+  if (Number.isNaN(date.getTime())) return value || new Date().toISOString();
+  return new Date(date.getTime() + minutes * 60000).toISOString();
 }
 
 function remoteMatchPlayerToLocal(row) {
