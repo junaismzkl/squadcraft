@@ -142,6 +142,7 @@ function openAuthModal(mode) {
   els.accountMenu.classList.add("hidden");
   els.accountMenuToggle.setAttribute("aria-expanded", "false");
   els.authModal.classList.remove("hidden");
+  setAuthModalMessage("");
   els.authSignInForm.classList.toggle("hidden", mode !== "sign_in");
   els.authCreateForm.classList.toggle("hidden", mode !== "create_account");
   els.authProfileForm.classList.toggle("hidden", mode !== "profile");
@@ -170,6 +171,7 @@ async function handleAuthLogin(event) {
   els.authLoginButton.disabled = false;
 
   if (!result.ok) {
+    setAuthModalMessage(result.message || "Sign in failed.", true);
     render();
     return;
   }
@@ -190,7 +192,7 @@ async function handleCreateAccount(event) {
 
   if (!email || !password) return;
   if (password !== confirmPassword) {
-    els.authMessage.textContent = "Passwords do not match.";
+    setAuthModalMessage("Passwords do not match.", true);
     return;
   }
 
@@ -198,6 +200,7 @@ async function handleCreateAccount(event) {
   const result = await createAccountWithEmailPassword({ email, password, name });
   els.authCreateButton.disabled = false;
   els.authMessage.textContent = result.message || "";
+  setAuthModalMessage(result.message || "", !result.ok);
 
   if (!result.ok) {
     render();
@@ -206,8 +209,20 @@ async function handleCreateAccount(event) {
 
   els.authCreatePassword.value = "";
   els.authCreateConfirm.value = "";
+  if (result.needsEmailConfirmation) {
+    els.authCreateEmail.value = "";
+    els.authCreateName.value = "";
+    return;
+  }
   closeAuthModal();
   render();
+}
+
+function setAuthModalMessage(message, isError = false) {
+  if (!els.authModalMessage) return;
+  els.authModalMessage.textContent = message || "";
+  els.authModalMessage.classList.toggle("hidden", !message);
+  els.authModalMessage.classList.toggle("error", Boolean(isError));
 }
 
 async function handleProfileSave(event) {

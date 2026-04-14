@@ -303,6 +303,24 @@ main {
   color: #f5d76e;
 }
 
+.auth-modal-message {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  color: #d8f5df;
+  background: rgba(22, 101, 52, 0.24);
+  border: 1px solid rgba(134, 239, 172, 0.28);
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.auth-modal-message.error {
+  color: #fee2e2;
+  background: rgba(127, 29, 29, 0.28);
+  border-color: rgba(252, 165, 165, 0.32);
+}
+
 .account-menu-item {
   min-height: 36px;
   padding: 8px 10px;

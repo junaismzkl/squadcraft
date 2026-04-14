@@ -12,6 +12,7 @@ export const els = {
   accountApprovals: document.querySelector("#account-approvals"),
   authModal: document.querySelector("#auth-modal"),
   authModalTitle: document.querySelector("#auth-modal-title"),
+  authModalMessage: document.querySelector("#auth-modal-message"),
   authModalClose: document.querySelector("#auth-modal-close"),
   authSignInForm: document.querySelector("#auth-sign-in-form"),
   authCreateForm: document.querySelector("#auth-create-form"),

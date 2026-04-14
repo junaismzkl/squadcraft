@@ -68,7 +68,9 @@ export async function signInWithEmailPassword(email, password) {
 
   if (error) {
     authState.isLoading = false;
-    authState.error = error.message || "Sign in failed.";
+    authState.error = isUnconfirmedEmailError(error)
+      ? "Your email is not confirmed yet. Please check your email and confirm your account."
+      : error.message || "Sign in failed.";
     return { ok: false, message: authState.error };
   }
 
@@ -114,7 +116,9 @@ export async function createAccountWithEmailPassword({ email, password, name }) 
   return {
     ok: true,
     needsEmailConfirmation: !data.session,
-    message: data.session ? "Account created." : "Check your email to confirm your account."
+    message: data.session
+      ? "Account created."
+      : "Account created. Check your email to confirm your account, then sign in. Check spam/junk if you do not see the email."
   };
 }
 
@@ -540,6 +544,15 @@ function isMissingPlayerProfileSchemaError(error) {
 function isDuplicateProfileError(error) {
   const message = String(error?.message || "").toLowerCase();
   return error?.code === "23505" || message.includes("duplicate") || message.includes("already exists");
+}
+
+function isUnconfirmedEmailError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  const code = String(error?.code || "").toLowerCase();
+  return code.includes("email_not_confirmed")
+    || message.includes("email not confirmed")
+    || message.includes("not confirmed")
+    || message.includes("confirm your email");
 }
 
 function approvalQueryErrorMessage(error, fallback) {
