@@ -105,6 +105,9 @@ export function generateTeams(matchTime = "", reshuffle = false, options = {}) {
 
     const existingMatchId = reshuffle && state.currentTeams?.status === "upcoming" ? state.currentTeams.id : "";
     const currentUser = getCurrentUser();
+    if (!currentUser) {
+      return { ok: false, message: "Sign in before creating matches." };
+    }
     setTeams({
       id: existingMatchId || `match-${Date.now()}`,
       status: "upcoming",

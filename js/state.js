@@ -10,12 +10,6 @@ export const USER_ROLES = {
   USER: "user"
 };
 
-export const DEFAULT_USERS = [
-  { id: "u1", name: "Junais", role: USER_ROLES.SUPER_ADMIN, isActive: true },
-  { id: "u2", name: "Admin Test", role: USER_ROLES.ADMIN, isActive: true },
-  { id: "u3", name: "User Test", role: USER_ROLES.USER, isActive: true }
-];
-
 export const PERMISSIONS = {
   [USER_ROLES.SUPER_ADMIN]: {
     manageUsers: true,
@@ -87,7 +81,7 @@ export const state = {
     matches: [],
     notifications: [],
     users: [],
-    currentUserId: DEFAULT_USERS[0].id,
+    currentUserId: "",
     authProfileId: "",
     activityLog: []
   },
@@ -221,7 +215,7 @@ export function setUsers(users) {
   const normalizedUsers = normalizeUsers(users);
   const currentUserId = normalizedUsers.some((user) => user.id === state.data.currentUserId)
     ? state.data.currentUserId
-    : normalizedUsers[0]?.id || DEFAULT_USERS[0].id;
+    : "";
   state.data = {
     ...state.data,
     users: normalizedUsers,
@@ -229,23 +223,12 @@ export function setUsers(users) {
   };
 }
 
-export function setCurrentUser(userId) {
-  if (state.data.authProfileId) return;
-  const nextUser = state.data.users.find((user) => user.id === userId && user.isActive);
-  if (!nextUser) return;
-  state.data = {
-    ...state.data,
-    currentUserId: nextUser.id
-  };
-  persist();
-}
-
 export function setAuthenticatedProfile(profile) {
   if (!profile?.id) return;
   const role = Object.values(USER_ROLES).includes(profile.role) ? profile.role : USER_ROLES.USER;
   const authUser = normalizeUser({
     id: profile.id,
-    name: profile.name || "Supabase User",
+    name: profile.display_name || profile.name || "Supabase User",
     role,
     isActive: profile.is_active !== false,
     createdAt: profile.created_at || new Date().toISOString()
@@ -266,13 +249,11 @@ export function setAuthenticatedProfile(profile) {
 
 export function clearAuthenticatedProfile() {
   if (!state.data.authProfileId) return;
-  const fallbackUserId = state.data.users.find((user) => user.id === DEFAULT_USERS[0].id)?.id
-    || state.data.users[0]?.id
-    || DEFAULT_USERS[0].id;
   state.data = {
     ...state.data,
+    users: [],
     authProfileId: "",
-    currentUserId: fallbackUserId
+    currentUserId: ""
   };
   persist();
 }
@@ -286,7 +267,8 @@ export function getUserName(userId) {
 }
 
 export function getCurrentUser() {
-  return getUserById(state.data.currentUserId) || state.data.users[0] || normalizeUser(DEFAULT_USERS[0]);
+  if (!state.data.authProfileId) return null;
+  return getUserById(state.data.currentUserId);
 }
 
 export function hasPermission(permissionKey, user = getCurrentUser()) {
@@ -335,7 +317,7 @@ export function logActivity(action, entityType, entityId, details = {}) {
     entityId,
     action,
     by: user?.id || "",
-    byName: user?.name || "Unknown",
+    byName: user?.name || "Signed out",
     at: new Date().toISOString(),
     details
   };
@@ -419,21 +401,19 @@ function loadStateData() {
     players: [],
     matches: [],
     notifications: [],
-    users: seedDefaultUsers(),
-    currentUserId: DEFAULT_USERS[0].id,
+    users: [],
+    currentUserId: "",
     authProfileId: "",
     activityLog: []
   };
   const saved = loadMatches();
-  if (!saved || !Array.isArray(saved.players) || !Array.isArray(saved.matches)) {
+  if (!saved || !Array.isArray(saved.players)) {
     return fallback;
   }
 
   saved.dataVersion = DATA_VERSION;
-  saved.users = normalizeUsers(saved.users);
-  saved.currentUserId = saved.users.some((user) => user.id === saved.currentUserId)
-    ? saved.currentUserId
-    : saved.users[0]?.id || DEFAULT_USERS[0].id;
+  saved.users = [];
+  saved.currentUserId = "";
   saved.authProfileId = "";
   state.data = {
     ...state.data,
@@ -441,11 +421,8 @@ function loadStateData() {
     currentUserId: saved.currentUserId,
     authProfileId: ""
   };
-  saved.players = sanitizePermanentPlayers(saved.players);
-
-  saved.matches.forEach((match) => {
-    normalizeStoredMatch(match);
-  });
+  saved.players = [];
+  saved.matches = [];
 
   saved.notifications = Array.isArray(saved.notifications)
     ? saved.notifications.map(normalizeNotification).filter(Boolean)
@@ -465,8 +442,8 @@ export function initState() {
     authProfileId: ""
   };
   setUsers(data.users);
-  setPlayers(data.players);
-  setMatches(data.matches);
+  setPlayers([]);
+  setMatches([]);
   setNotifications(data.notifications || []);
   setActivityLog(data.activityLog || []);
   clearSelectedPlayerIds();
@@ -480,11 +457,11 @@ export function persist() {
   saveMatches({
     dataVersion: DATA_VERSION,
     ...state.data,
-    players: sanitizePermanentPlayers(state.data.players),
-    matches: [...(state.data.matches || [])].map(normalizeMatchRecord),
+    players: [],
+    matches: [],
     notifications: [...(state.data.notifications || [])],
     users: normalizeUsers(state.data.users),
-    currentUserId: state.data.currentUserId || DEFAULT_USERS[0].id,
+    currentUserId: state.data.currentUserId || "",
     authProfileId: state.data.authProfileId || "",
     activityLog: [...(state.data.activityLog || [])]
   });
@@ -493,7 +470,7 @@ export function persist() {
 export function normalizePlayerRecord(player = {}) {
   const positions = normalizePlayerPositions(player);
   const now = new Date().toISOString();
-  const fallbackOwner = player.ownerUserId || player.createdBy || DEFAULT_USERS[0].id;
+  const fallbackOwner = player.ownerUserId || player.createdBy || "";
   const approvalStatus = ["pending", "rejected"].includes(player.approvalStatus) ? player.approvalStatus : "approved";
   return {
     ...player,
@@ -508,7 +485,7 @@ export function normalizePlayerRecord(player = {}) {
     createdAt: player.createdAt || now,
     updatedBy: player.updatedBy || player.createdBy || fallbackOwner,
     updatedAt: player.updatedAt || player.createdAt || now,
-    approvedBy: approvalStatus !== "pending" ? (player.approvedBy || DEFAULT_USERS[0].id) : "",
+    approvedBy: approvalStatus !== "pending" ? (player.approvedBy || "") : "",
     approvedAt: approvalStatus !== "pending" ? (player.approvedAt || player.createdAt || now) : "",
     approvalStatus,
     stats: {
@@ -536,20 +513,12 @@ export function normalizeUser(user = {}) {
   };
 }
 
-function seedDefaultUsers() {
-  const now = new Date().toISOString();
-  return DEFAULT_USERS.map((user) => ({
-    ...user,
-    createdAt: user.createdAt || now
-  }));
-}
-
 export function normalizeUsers(users) {
-  const normalized = [...(Array.isArray(users) && users.length ? users : seedDefaultUsers())]
+  const normalized = [...(Array.isArray(users) ? users : [])]
     .map(normalizeUser)
     .filter((user) => user.id);
   const byId = new Map();
-  [...seedDefaultUsers(), ...normalized].forEach((user) => byId.set(user.id, normalizeUser(user)));
+  normalized.forEach((user) => byId.set(user.id, normalizeUser(user)));
   return [...byId.values()];
 }
 
@@ -570,7 +539,7 @@ export function normalizeActivityLogEntry(entry) {
     entityType: entry.entityType,
     entityId: entry.entityId || "",
     action: entry.action,
-    by: entry.by || DEFAULT_USERS[0].id,
+    by: entry.by || "",
     byName: entry.byName || getUserName(entry.by),
     at: entry.at || new Date().toISOString(),
     details: entry.details || {}
@@ -579,7 +548,7 @@ export function normalizeActivityLogEntry(entry) {
 
 export function normalizeStoredMatch(match) {
   const now = new Date().toISOString();
-  const fallbackUserId = match.createdBy || DEFAULT_USERS[0].id;
+  const fallbackUserId = match.createdBy || "";
   match.dateTime = match.dateTime || match.date || new Date().toISOString();
   match.startTime = match.startTime || match.dateTime;
   match.endTime = match.endTime || match.dateTime;
@@ -630,7 +599,7 @@ export function normalizeMatchEditHistoryEntry(entry) {
   if (!entry || !entry.action) return null;
   return {
     action: entry.action,
-    by: entry.by || DEFAULT_USERS[0].id,
+    by: entry.by || "",
     byName: entry.byName || getUserName(entry.by),
     at: entry.at || new Date().toISOString(),
     details: entry.details || {}
@@ -831,8 +800,8 @@ export function serializeCurrentMatch(overrides = {}) {
   const startTime = state.currentTeams.startTime ||
     (state.currentTeams.matchTime ? new Date(state.currentTeams.matchTime).toISOString() : new Date().toISOString());
   const endTime = state.currentTeams.endTime || startTime;
-  const persistedTeamA = state.currentTeams.teamA.filter((player) => !player.isGuest);
-  const persistedTeamB = state.currentTeams.teamB.filter((player) => !player.isGuest);
+  const persistedTeamA = state.currentTeams.teamA;
+  const persistedTeamB = state.currentTeams.teamB;
   const persistedPlayerIds = new Set([...persistedTeamA, ...persistedTeamB].map((player) => player.id));
   const persistedResult = state.currentTeams.result
     ? {
@@ -882,6 +851,7 @@ export function persistCurrentMatch(overrides = {}) {
   if (!baseMatch) return;
   const existingMatch = state.data.matches.find((item) => item.id === baseMatch.id);
   const user = getCurrentUser();
+  if (!user) return;
   const now = new Date().toISOString();
   const match = {
     ...baseMatch,
@@ -913,6 +883,8 @@ export function persistCurrentMatch(overrides = {}) {
     logActivity(logAction || auditAction, "match", match.id, auditDetails);
   }
   persist();
+  window.dispatchEvent(new CustomEvent("match:local-persisted", { detail: { match } }));
+  return match;
 }
 
 export function setNotifications(notifications) {
@@ -945,7 +917,7 @@ export function removeNotification(notificationId) {
 export function getNotifications() {
   const currentUser = getCurrentUser();
   return [...(state.data.notifications || [])]
-    .filter((notification) => !notification.userId || notification.userId === currentUser.id)
+    .filter((notification) => !notification.userId || notification.userId === currentUser?.id)
     .sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );

@@ -168,14 +168,34 @@ export async function signOutCurrentUser() {
   return { ok: true };
 }
 
-export async function saveCurrentProfile({ name, avatarUrl } = {}) {
+export async function saveCurrentProfile({
+  name,
+  displayName,
+  primaryPosition,
+  secondaryPosition,
+  thirdPosition,
+  dominantFoot,
+  jerseyNumber,
+  avatarUrl
+} = {}) {
   const user = authState.currentAuthUser;
   if (!user?.id) return { ok: false, message: "Sign in before saving a profile." };
 
   authState.error = "";
+  const safeName = String(name || "").trim() || user.email || "User";
+  const safeDisplayName = String(displayName || "").trim();
+  const safePrimaryPosition = normalizePlayerPosition(primaryPosition);
+  const playerProfileCompleted = Boolean((safeDisplayName || safeName) && safePrimaryPosition);
   const profilePatch = {
     id: user.id,
-    name: String(name || "").trim() || user.email || "User",
+    name: safeName,
+    display_name: safeDisplayName,
+    primary_position: safePrimaryPosition,
+    secondary_position: normalizePlayerPosition(secondaryPosition),
+    third_position: normalizePlayerPosition(thirdPosition),
+    dominant_foot: normalizeDominantFoot(dominantFoot),
+    jersey_number: normalizeJerseyNumber(jerseyNumber),
+    player_profile_completed: playerProfileCompleted,
     role: authState.currentProfile?.role || "user",
     is_active: authState.currentProfile?.is_active ?? false,
     approval_status: authState.currentProfile?.approval_status || "pending"
@@ -198,6 +218,10 @@ export async function saveCurrentProfile({ name, avatarUrl } = {}) {
       console.warn("Supabase profiles avatar_url column is missing. Saving profile name without image until avatar_url is added.");
       return saveCurrentProfileWithoutAvatar(profilePatch);
     }
+    if (isMissingPlayerProfileSchemaError(error)) {
+      console.warn("Supabase player profile columns are missing. Saving account fields only until profile player columns are added.");
+      return saveCurrentProfileWithoutPlayerFields(profilePatch);
+    }
     if (isMissingApprovalSchemaError(error)) {
       authState.approvalSchemaReady = false;
       console.warn("Supabase profiles approval columns are missing. Saving profile with legacy columns only.");
@@ -211,6 +235,22 @@ export async function saveCurrentProfile({ name, avatarUrl } = {}) {
   authState.currentProfile = data;
   setAuthenticatedProfile(data);
   return { ok: true, profile: data };
+}
+
+function normalizePlayerPosition(value) {
+  const position = String(value || "").trim().toUpperCase();
+  return ["GK", "CB", "WB", "CM", "WF", "CF"].includes(position) ? position : "";
+}
+
+function normalizeDominantFoot(value) {
+  const foot = String(value || "").trim();
+  return ["Right", "Left", "Both"].includes(foot) ? foot : "";
+}
+
+function normalizeJerseyNumber(value) {
+  if (value === "" || value === null || value === undefined) return null;
+  const number = Math.floor(Number(value));
+  return Number.isFinite(number) && number >= 0 && number <= 99 ? number : null;
 }
 
 export async function loadPendingProfiles() {
@@ -345,6 +385,9 @@ async function saveCurrentProfileWithoutAvatar(profilePatch) {
     .single();
 
   if (error) {
+    if (isMissingPlayerProfileSchemaError(error)) {
+      return saveCurrentProfileWithoutPlayerFields(safePatch);
+    }
     if (isMissingApprovalSchemaError(error)) {
       authState.approvalSchemaReady = false;
       return saveLegacyProfile({ name: safePatch.name });
@@ -360,6 +403,40 @@ async function saveCurrentProfileWithoutAvatar(profilePatch) {
     ok: true,
     profile: data,
     message: "Profile saved. Add an avatar_url column to keep profile images online."
+  };
+}
+
+async function saveCurrentProfileWithoutPlayerFields(profilePatch) {
+  const {
+    display_name,
+    primary_position,
+    secondary_position,
+    third_position,
+    dominant_foot,
+    jersey_number,
+    player_profile_completed,
+    ...safePatch
+  } = profilePatch;
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .upsert(safePatch)
+    .select("*")
+    .single();
+
+  if (error) {
+    if (isMissingAvatarSchemaError(error)) return saveCurrentProfileWithoutAvatar(safePatch);
+    authState.error = error.message || "Could not save profile.";
+    console.error("Failed to save Supabase profile without player fields.", error);
+    return { ok: false, message: authState.error };
+  }
+
+  authState.currentProfile = data;
+  setAuthenticatedProfile(data);
+  return {
+    ok: true,
+    profile: data,
+    message: "Profile saved. Add player profile columns to keep position details online."
   };
 }
 
@@ -448,6 +525,17 @@ function isMissingApprovalSchemaError(error) {
 function isMissingAvatarSchemaError(error) {
   const message = String(error?.message || "");
   return message.includes("avatar_url");
+}
+
+function isMissingPlayerProfileSchemaError(error) {
+  const message = String(error?.message || "");
+  return message.includes("display_name")
+    || message.includes("primary_position")
+    || message.includes("secondary_position")
+    || message.includes("third_position")
+    || message.includes("dominant_foot")
+    || message.includes("jersey_number")
+    || message.includes("player_profile_completed");
 }
 
 function isDuplicateProfileError(error) {

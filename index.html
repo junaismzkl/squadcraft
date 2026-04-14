@@ -14,10 +14,6 @@
         <span class="title-main">Squad</span><span class="title-accent">Craft</span>
       </h1>
       <div class="topbar-actions">
-        <label class="user-switcher">
-          <span>User</span>
-          <select id="current-user-select" aria-label="Current user"></select>
-        </label>
         <button class="notification-button" id="notifications-toggle" type="button" aria-label="Notifications">
           <div class="header-icon" aria-hidden="true">
             <svg class="header-logo-mark" viewBox="0 0 64 64" focusable="false">
@@ -72,8 +68,51 @@
             </div>
           </div>
           <label>Name <input id="auth-profile-name" type="text" autocomplete="name" required></label>
+          <label>Display Name <input id="auth-profile-display-name" type="text" autocomplete="nickname"></label>
+          <label>Primary Position
+            <select id="auth-profile-primary-position">
+              <option value="">Choose position</option>
+              <option>GK</option>
+              <option>CB</option>
+              <option>WB</option>
+              <option>CM</option>
+              <option>WF</option>
+              <option>CF</option>
+            </select>
+          </label>
+          <label>Secondary Position
+            <select id="auth-profile-secondary-position">
+              <option value="">Optional</option>
+              <option>GK</option>
+              <option>CB</option>
+              <option>WB</option>
+              <option>CM</option>
+              <option>WF</option>
+              <option>CF</option>
+            </select>
+          </label>
+          <label>Third Position
+            <select id="auth-profile-third-position">
+              <option value="">Optional</option>
+              <option>GK</option>
+              <option>CB</option>
+              <option>WB</option>
+              <option>CM</option>
+              <option>WF</option>
+              <option>CF</option>
+            </select>
+          </label>
+          <label>Dominant Foot
+            <select id="auth-profile-dominant-foot">
+              <option value="">Optional</option>
+              <option>Right</option>
+              <option>Left</option>
+              <option>Both</option>
+            </select>
+          </label>
+          <label>Jersey Number <input id="auth-profile-jersey-number" type="number" min="0" max="99" inputmode="numeric"></label>
           <label>Profile Image <input id="auth-profile-avatar" type="file" accept="image/*"></label>
-          <p class="helper" id="auth-profile-message">Role is controlled by admins. New accounts use User access.</p>
+          <p class="helper" id="auth-profile-message">Role is controlled by admins. Add a display name and primary position to complete your player profile.</p>
           <button class="primary" id="auth-profile-save" type="submit">Save Profile</button>
         </form>
       </div>

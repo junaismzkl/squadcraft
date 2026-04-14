@@ -1,116 +1,77 @@
 import { supabase } from "./supabaseClient.js";
 import { normalizePlayerRecord, setPlayers, state } from "./state.js";
 
-const PLAYERS_TABLE = "players";
-
 export async function loadSharedPlayersIntoState() {
-  const { data, error } = await supabase
-    .from(PLAYERS_TABLE)
+  const baseQuery = supabase
+    .from("profiles")
     .select("*")
-    .order("created_at", { ascending: true });
+    .eq("is_active", true)
+    .eq("approval_status", "approved");
+
+  const { data, error } = await baseQuery
+    .order("player_profile_completed", { ascending: false })
+    .order("display_name", { ascending: true });
 
   if (error) {
-    console.warn("Supabase players table is not available. Player approval remains local-only until the players table and RLS policies are added.", error);
-    return { ok: false, message: error.message };
+    const fallback = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("is_active", true)
+      .eq("approval_status", "approved")
+      .order("name", { ascending: true });
+
+    if (fallback.error) {
+      console.warn("Could not load approved profile players from Supabase.", fallback.error);
+      return { ok: false, message: fallback.error.message };
+    }
+
+    setPlayers((fallback.data || []).map(profileToPlayer));
+    return { ok: true, players: state.data.players };
   }
 
-  setPlayers((data || []).map(remotePlayerToLocal));
+  setPlayers((data || []).map(profileToPlayer));
   return { ok: true, players: state.data.players };
 }
 
 export async function saveSharedPlayer(player) {
-  const { error } = await supabase
-    .from(PLAYERS_TABLE)
-    .upsert(localPlayerToRemote(player));
-
-  if (error) {
-    console.warn("Could not save player to Supabase. This player is only saved in this browser.", error);
-    return { ok: false, message: error.message };
-  }
-
-  return { ok: true };
+  return { ok: true, player };
 }
 
 export async function approveSharedPlayer(playerId, approvalPatch) {
-  const { error } = await supabase
-    .from(PLAYERS_TABLE)
-    .update(localPlayerToRemoteApprovalPatch(approvalPatch))
-    .eq("id", playerId)
-    .eq("approval_status", "pending");
-
-  if (error) {
-    console.warn("Could not approve player in Supabase.", error);
-    return { ok: false, message: error.message };
-  }
-
-  return { ok: true };
+  return { ok: true, playerId, approvalPatch };
 }
 
 export async function rejectSharedPlayer(playerId, rejectionPatch) {
-  const { error } = await supabase
-    .from(PLAYERS_TABLE)
-    .update(localPlayerToRemoteApprovalPatch(rejectionPatch))
-    .eq("id", playerId)
-    .eq("approval_status", "pending");
-
-  if (error) {
-    console.warn("Could not reject player in Supabase.", error);
-    return { ok: false, message: error.message };
-  }
-
-  return { ok: true };
+  return { ok: true, playerId, rejectionPatch };
 }
 
-function localPlayerToRemote(player) {
-  return {
-    id: player.id,
-    name: player.name,
-    rating: player.rating,
-    positions: player.positions || {},
-    role: player.role || player.positions?.primary || "",
-    position: player.position || player.positions?.secondary || "",
-    image: player.image || "",
-    is_guest: Boolean(player.isGuest),
-    owner_user_id: player.ownerUserId || "",
-    created_by: player.createdBy || "",
-    created_at: player.createdAt,
-    updated_by: player.updatedBy || "",
-    updated_at: player.updatedAt,
-    approved_by: player.approvedBy || "",
-    approved_at: player.approvedAt || null,
-    approval_status: player.approvalStatus || "approved",
-    stats: player.stats || {}
-  };
-}
-
-function localPlayerToRemoteApprovalPatch(patch) {
-  return {
-    approval_status: patch.approvalStatus,
-    approved_by: patch.approvedBy || "",
-    approved_at: patch.approvedAt || null,
-    updated_by: patch.updatedBy || "",
-    updated_at: patch.updatedAt || new Date().toISOString()
-  };
-}
-
-function remotePlayerToLocal(row) {
+function profileToPlayer(profile) {
+  const name = profile.display_name || profile.name || "Approved Player";
   return normalizePlayerRecord({
-    id: row.id,
-    name: row.name,
-    rating: row.rating,
-    positions: row.positions || {},
-    role: row.role,
-    position: row.position,
-    image: row.image || "",
-    isGuest: row.is_guest,
-    ownerUserId: row.owner_user_id,
-    createdBy: row.created_by,
-    createdAt: row.created_at,
-    updatedBy: row.updated_by,
-    updatedAt: row.updated_at,
-    approvedBy: row.approved_by,
-    approvedAt: row.approved_at,
-    approvalStatus: row.approval_status,
-    stats: row.stats || {}
+    id: profile.id,
+    profileId: profile.id,
+    name,
+    rating: 50,
+    positions: {
+      primary: profile.primary_position || "CM",
+      secondary: profile.secondary_position || "",
+      tertiary: profile.third_position || ""
+    },
+    role: profile.primary_position || "CM",
+    position: profile.secondary_position || "",
+    image: profile.avatar_url || "",
+    isGuest: false,
+    ownerUserId: profile.id,
+    createdBy: profile.id,
+    createdAt: profile.created_at,
+    updatedBy: profile.id,
+    updatedAt: profile.updated_at || profile.created_at,
+    approvedBy: profile.approved_by || "",
+    approvedAt: profile.approved_at || profile.created_at,
+    approvalStatus: "approved",
+    jerseyNumber: profile.jersey_number ?? "",
+    dominantFoot: profile.dominant_foot || "",
+    playerProfileCompleted: Boolean(profile.player_profile_completed),
+    profileBacked: true
   });
 }

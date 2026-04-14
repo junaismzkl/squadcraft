@@ -394,30 +394,6 @@ main {
   color: #fca5a5;
 }
 
-.user-switcher {
-  display: grid;
-  gap: 4px;
-  color: rgba(226, 232, 240, 0.64);
-  font-size: 0.68rem;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.user-switcher select {
-  min-height: 36px;
-  max-width: 176px;
-  padding: 8px 28px 8px 10px;
-  color: #f8fafc;
-  background: rgba(15, 23, 32, 0.74);
-  border-color: rgba(214, 191, 116, 0.18);
-  border-radius: 8px;
-  font-size: 0.78rem;
-  font-weight: 800;
-  text-transform: none;
-  letter-spacing: 0;
-}
-
 .app-title {
   margin: 0;
   font-size: 26px;
@@ -3173,15 +3149,6 @@ select:focus {
   }
   .auth-message {
     font-size: 0.68rem;
-  }
-  .user-switcher span {
-    display: none;
-  }
-  .user-switcher select {
-    max-width: 132px;
-    min-height: 34px;
-    padding: 7px 24px 7px 8px;
-    font-size: 0.72rem;
   }
   .app-footer {
     width: min(calc(100% - 16px), 1100px);

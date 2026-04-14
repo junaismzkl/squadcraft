@@ -2,7 +2,8 @@ import { els } from "./dom.js";
 import { approveUserProfile, authState, canApproveUsers, canManageRoles, isApprovedProfile, loadPendingProfiles, updateUserRole } from "./auth.js";
 import { generateLineupPositions } from "./formation.js";
 import { clearLiveTimer, renderLiveMatch } from "./liveMatch.js";
-import { approveSharedPlayer, loadSharedPlayersIntoState, rejectSharedPlayer, saveSharedPlayer } from "./playerStore.js";
+import { deleteSharedMatch } from "./matchStore.js";
+import { loadSharedPlayersIntoState } from "./playerStore.js";
 import {
   getMatchSettings,
   normalizeCaptains,
@@ -79,7 +80,6 @@ import {
   serializeCurrentMatch,
   setMatches,
   setPlayers,
-  setCurrentUser,
   persistCurrentMatch,
   syncNotificationsWithMatches,
   state,
@@ -130,7 +130,6 @@ export function render() {
   try {
     filterSelectedPlayerIds((id) => state.data.players.some((player) => player.id === id && player.approvalStatus === "approved"));
     renderAuthState();
-    renderCurrentUserSwitcher();
     if (renderPendingApprovalView()) return;
     renderHome();
     renderPlayers();
@@ -227,7 +226,7 @@ function renderAuthState() {
   if (els.accountMenuUser) {
     const roleLabel = profile?.role ? ` - ${formatRoleLabel(profile.role)}` : "";
     els.accountMenuUser.textContent = hasSession
-      ? `${profile?.name || authState.currentAuthUser?.email || "Signed in"}${roleLabel}`
+      ? `${profile?.display_name || profile?.name || authState.currentAuthUser?.email || "Signed in"}${roleLabel}`
       : "Account";
   }
 
@@ -276,34 +275,9 @@ function renderPendingApprovalView() {
   return true;
 }
 
-function renderCurrentUserSwitcher() {
-  if (!els.currentUserSelect) return;
-  const switcher = els.currentUserSelect.closest(".user-switcher");
-  switcher?.classList.toggle("hidden", Boolean(authState.isAuthenticated));
-  if (authState.isAuthenticated) return;
-  const currentValue = els.currentUserSelect.value;
-  const nextMarkup = state.data.users
-    .filter((user) => user.isActive)
-    .map((user) => `<option value="${escapeHtml(user.id)}">${escapeHtml(user.name)} - ${escapeHtml(formatRoleLabel(user.role))}</option>`)
-    .join("");
-  if (els.currentUserSelect.innerHTML !== nextMarkup) {
-    els.currentUserSelect.innerHTML = nextMarkup;
-  }
-  els.currentUserSelect.value = state.data.currentUserId || currentValue;
-}
-
-export function changeCurrentUser(userId) {
-  setCurrentUser(userId);
-  isManagePlayersMode = false;
-  resetPlayerForm();
-  clearManualSwapSelection();
-  render();
-}
-
 export async function openUserManagement() {
   if (!canApproveUsers()) return;
   await loadPendingProfiles();
-  await loadSharedPlayersIntoState();
   isManagePlayersMode = true;
   switchTab("players");
   render();
@@ -311,6 +285,9 @@ export async function openUserManagement() {
 
 export async function savePlayerFromForm(event) {
   event.preventDefault();
+  alert("Permanent players now come from approved user profiles. Use Profile Setup to update player details.");
+  resetPlayerForm();
+  return;
   const name = els.playerName.value.trim();
   const positions = getSelectedFormPositions(
     els.playerRole.value,
@@ -323,6 +300,10 @@ export async function savePlayerFromForm(event) {
   const existingPlayer = state.data.players.find((item) => item.id === editingId);
   const image = imageDrafts.player || existingPlayer?.image || "";
   const currentUser = getCurrentUser();
+  if (!currentUser || !hasPermission("editOwnPlayer", currentUser)) {
+    alert("Sign in before creating or editing players.");
+    return;
+  }
   const now = new Date().toISOString();
 
   if (editingId) {
@@ -363,10 +344,6 @@ export async function savePlayerFromForm(event) {
   } else {
     const player = createPlayer({ name, rating: els.playerRating.value, positions, image, isGuest });
     addPlayer(player);
-    const sharedResult = await saveSharedPlayer(player);
-    if (!sharedResult.ok && player.approvalStatus === "pending") {
-      alert("Player was saved only in this browser. Add the Supabase players table so admins can review it.");
-    }
     logActivity("player_created", "player", player.id, { name, approvalStatus: player.approvalStatus });
     if (player.approvalStatus === "pending") {
       addNotification({
@@ -387,10 +364,7 @@ export async function savePlayerFromForm(event) {
 }
 
 export function showPlayerForm() {
-  isPlayerFormVisible = true;
-  syncPlayerFormVisibility();
-  els.playerRating.disabled = false;
-  els.playerName.focus();
+  alert("Permanent players now come from approved user profiles. Use Profile Setup to update your player details.");
 }
 
 export function createPlayer({ name, rating, positions, image = "", isGuest }) {
@@ -400,6 +374,7 @@ export function createPlayer({ name, rating, positions, image = "", isGuest }) {
     positions?.tertiary
   );
   const currentUser = getCurrentUser();
+  if (!currentUser) throw new Error("Cannot create a player without a signed-in user.");
   const now = new Date().toISOString();
   const canModerate = canApprovePlayer(currentUser);
   const playerId = window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : `player-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -515,9 +490,6 @@ export async function approvePlayer(id) {
         : item
     )
   );
-  const sharedResult = await approveSharedPlayer(id, approvalPatch);
-  if (!sharedResult.ok) alert(sharedResult.message || "Player approved locally, but Supabase approval failed.");
-  await loadSharedPlayersIntoState();
   logActivity("player_approved", "player", id, { name: player.name });
   removeNotification(`player-approval-${id}`);
   persist();
@@ -550,9 +522,6 @@ export async function rejectPlayer(id) {
         : item
     )
   );
-  const sharedResult = await rejectSharedPlayer(id, rejectionPatch);
-  if (!sharedResult.ok) alert(sharedResult.message || "Player rejected locally, but Supabase rejection failed.");
-  await loadSharedPlayersIntoState();
   logActivity("player_rejected", "player", id, { name: player.name });
   removeNotification(`player-approval-${id}`);
   persist();
@@ -561,6 +530,10 @@ export async function rejectPlayer(id) {
 
 export async function addQuickGuest(event) {
   event.preventDefault();
+  if (!hasPermission("createMatch")) {
+    alert("Sign in before adding guest players.");
+    return;
+  }
   const name = els.guestName.value.trim();
   if (!name) return;
   const image = imageDrafts.guest || "";
@@ -875,6 +848,7 @@ export function renderPlayers() {
 
 function renderPlayersToolbar() {
   if (!els.showPlayerForm?.parentElement) return;
+  els.showPlayerForm.classList.add("hidden");
   let manageButton = document.querySelector("#toggle-manage-players");
   if (!canManagePlayers()) {
     isManagePlayersMode = false;
@@ -907,15 +881,11 @@ function getVisiblePlayersForCurrentUser() {
 }
 
 function getPendingPlayersForAdmin() {
-  if (!canManagePlayers()) return [];
-  return state.data.players
-    .filter((player) => player.approvalStatus === "pending")
-    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() || a.name.localeCompare(b.name));
+  return [];
 }
 
 function getPendingPlayersForCurrentUser() {
-  const currentUser = getCurrentUser();
-  return state.data.players.filter((player) => player.approvalStatus === "pending" && player.createdBy === currentUser.id);
+  return [];
 }
 
 function renderPendingApprovalNotice() {
@@ -1019,6 +989,7 @@ function renderPendingUsersAdminSection() {
       });
       const result = await approveUserProfile(targetProfileId, selectedRole);
       if (!result.ok) alert(result.message);
+      await loadSharedPlayersIntoState();
       render();
     });
     row.querySelector("[data-user-role]")?.addEventListener("change", async (event) => {
@@ -1027,6 +998,7 @@ function renderPendingUsersAdminSection() {
       const targetProfileId = String(roleSelect.dataset.profileId || parentRow?.dataset.profileId || "").trim();
       const result = await updateUserRole(targetProfileId, event.target.value);
       if (!result.ok) alert(result.message);
+      await loadSharedPlayersIntoState();
       render();
     });
     list.appendChild(row);
@@ -1090,6 +1062,7 @@ export function createPlayerCard(player, options = {}) {
 }
 
 export function cardActionMarkup(player, options) {
+  if (player.profileBacked) return "";
   if (options.actions === "manage") {
     const actions = [];
     if (canEditPlayer(player) && player.approvalStatus === "approved") {
@@ -1324,6 +1297,10 @@ export function initUI() {
 }
 
 export function startMatchCreation() {
+  if (!hasPermission("createMatch")) {
+    els.teamBalanceNote.textContent = "Sign in before creating matches.";
+    return;
+  }
   resetMatchSetupState();
   showAllHomeUpcomingMatches = false;
   matchWizardStep = 1;
@@ -1694,11 +1671,13 @@ function renderHomeFeedback() {
 }
 
 function syncPlayerFormVisibility() {
-  els.playerForm.classList.toggle("hidden", !isPlayerFormVisible);
-  els.showPlayerForm.classList.toggle("hidden", isPlayerFormVisible);
+  isPlayerFormVisible = false;
+  els.playerForm.classList.add("hidden");
+  els.showPlayerForm.classList.add("hidden");
 }
 
 function renderMatchLanding() {
+  els.createNewMatch.classList.toggle("hidden", !hasPermission("createMatch"));
   els.matchUpcomingList.innerHTML = "";
   const upcomingMatches = state.data.matches
     .filter((match) => isUpcomingMatch(match))
@@ -1924,7 +1903,7 @@ function returnToMatchList() {
   renderMatchSection();
 }
 
-function deleteCurrentMatch(matchId) {
+async function deleteCurrentMatch(matchId) {
   if (!matchId) return;
   const match = state.data.matches.find((item) => item.id === matchId);
   if (!canDeleteMatch(match)) {
@@ -1932,6 +1911,8 @@ function deleteCurrentMatch(matchId) {
     return;
   }
   removeMatch(matchId);
+  const deleteResult = await deleteSharedMatch(matchId);
+  if (!deleteResult.ok) alert(deleteResult.message || "Match deleted locally, but Supabase delete failed.");
   logActivity("match_deleted", "match", matchId, {
     label: match ? `${match.teamAName || "Team A"} vs ${match.teamBName || "Team B"}` : ""
   });
@@ -1942,16 +1923,6 @@ function deleteCurrentMatch(matchId) {
 }
 
 function saveCurrentLineup(match) {
-  const teamAPlayers = match.teamA || match.teamAPlayers || [];
-  const teamBPlayers = match.teamB || match.teamBPlayers || [];
-  const matchData = {
-    teamA: teamAPlayers,
-    teamB: teamBPlayers,
-    formationA: match.formationA || match.formation || "",
-    formationB: match.formationB || match.formation || "",
-    date: new Date().toISOString()
-  };
-  localStorage.setItem("currentMatch", JSON.stringify(matchData));
   const pitch = els.teamsArea.querySelector(".football-pitch");
   const html2canvas = window.html2canvas;
 

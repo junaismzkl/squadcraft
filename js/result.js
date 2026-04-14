@@ -225,8 +225,8 @@ export function saveMatchResult(event, els) {
 
   updateTeams((teams) => ({
     ...teams,
-    teamA: teams.teamA.filter((player) => !player.isGuest),
-    teamB: teams.teamB.filter((player) => !player.isGuest),
+    teamA: teams.teamA,
+    teamB: teams.teamB,
     captainAId: persistedPlayerIds.has(teams.captainAId) ? teams.captainAId : "",
     captainBId: persistedPlayerIds.has(teams.captainBId) ? teams.captainBId : "",
     status: "completed",

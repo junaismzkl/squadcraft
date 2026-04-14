@@ -1,12 +1,13 @@
 import { els } from "./dom.js";
 import { authState, createAccountWithEmailPassword, saveCurrentProfile, signInWithEmailPassword, signOutCurrentUser } from "./auth.js";
+import { loadSharedMatchesIntoState } from "./matchStore.js";
 import { generateTeams, getMatchSettings, toggleSelectAllPlayers } from "./match.js";
+import { loadSharedPlayersIntoState } from "./playerStore.js";
 import { addScorerRow, openResultPanel, saveMatchResult, updateScoreFromScorers } from "./result.js";
 import { readFileAsDataUrl, resizeImageDataUrl } from "./utils.js";
 import {
   addQuickGuest,
   cancelMatchCreation,
-  changeCurrentUser,
   createMatchAndReturnHome,
   goToLineupStep,
   goToMatchLandingStep,
@@ -33,7 +34,8 @@ import {
 let profileAvatarDraft = "";
 
 export function bindEvents() {
-  window.addEventListener("auth:changed", render);
+  window.addEventListener("auth:changed", handleAuthChanged);
+  window.addEventListener("match:sync-error", handleMatchSyncError);
   els.tabs.forEach((button) => button.addEventListener("click", () => switchTab(button.dataset.tab)));
   els.notificationsToggle.addEventListener("click", toggleNotificationsPanel);
   els.accountMenuToggle?.addEventListener("click", toggleAccountMenu);
@@ -48,7 +50,6 @@ export function bindEvents() {
   els.authProfileForm?.addEventListener("submit", handleProfileSave);
   els.authProfileAvatar?.addEventListener("change", handleProfileAvatarChange);
   els.authLogout?.addEventListener("click", handleAuthLogout);
-  els.currentUserSelect?.addEventListener("change", (event) => changeCurrentUser(event.target.value));
   els.showPlayerForm.addEventListener("click", showPlayerForm);
   els.playerForm.addEventListener("submit", savePlayerFromForm);
   els.cancelEditPlayer.addEventListener("click", resetPlayerForm);
@@ -100,6 +101,18 @@ export function bindEvents() {
   });
   document.addEventListener("click", handleDocumentClick);
   document.addEventListener("live-match:updated", handleLiveMatchUpdate);
+}
+
+function handleMatchSyncError(event) {
+  const message = event.detail?.message || "Could not sync match to Supabase.";
+  if (els.authMessage) els.authMessage.textContent = message;
+  console.warn("Match Supabase sync failed.", event.detail);
+}
+
+async function handleAuthChanged() {
+  if (authState.isAuthenticated) await loadSharedPlayersIntoState();
+  await loadSharedMatchesIntoState();
+  render();
 }
 
 function toggleAccountMenu() {
@@ -206,7 +219,15 @@ async function handleProfileSave(event) {
   }
 
   els.authProfileSave.disabled = true;
-  const profilePayload = { name };
+  const profilePayload = {
+    name,
+    displayName: els.authProfileDisplayName?.value.trim() || "",
+    primaryPosition: els.authProfilePrimaryPosition?.value || "",
+    secondaryPosition: els.authProfileSecondaryPosition?.value || "",
+    thirdPosition: els.authProfileThirdPosition?.value || "",
+    dominantFoot: els.authProfileDominantFoot?.value || "",
+    jerseyNumber: els.authProfileJerseyNumber?.value || ""
+  };
   const avatarUrl = profileAvatarDraft || authState.currentProfile?.avatar_url || "";
   if (avatarUrl) profilePayload.avatarUrl = avatarUrl;
   const result = await saveCurrentProfile(profilePayload);
@@ -218,6 +239,7 @@ async function handleProfileSave(event) {
     return;
   }
   profileAvatarDraft = result.profile?.avatar_url || profileAvatarDraft;
+  await loadSharedPlayersIntoState();
   render();
   populateProfileForm();
   setProfileMessage(result.message || "Profile saved.");
@@ -258,13 +280,19 @@ function populateProfileForm() {
   profileAvatarDraft = profile.avatar_url || "";
 
   if (els.authProfileName) els.authProfileName.value = profile.name || "";
+  if (els.authProfileDisplayName) els.authProfileDisplayName.value = profile.display_name || profile.name || "";
+  if (els.authProfilePrimaryPosition) els.authProfilePrimaryPosition.value = profile.primary_position || "";
+  if (els.authProfileSecondaryPosition) els.authProfileSecondaryPosition.value = profile.secondary_position || "";
+  if (els.authProfileThirdPosition) els.authProfileThirdPosition.value = profile.third_position || "";
+  if (els.authProfileDominantFoot) els.authProfileDominantFoot.value = profile.dominant_foot || "";
+  if (els.authProfileJerseyNumber) els.authProfileJerseyNumber.value = profile.jersey_number ?? "";
   if (els.authProfileEmail) els.authProfileEmail.textContent = email || "Signed in";
   if (els.authProfileRole) els.authProfileRole.textContent = formatRoleLabel(profile.role || "user");
   if (els.authProfileAvatar) els.authProfileAvatar.value = "";
   if (els.authProfileAvatarPreview) {
     els.authProfileAvatarPreview.src = profileAvatarDraft || createProfilePlaceholder(profile.name || email || "User");
   }
-  setProfileMessage("Role is controlled by admins. New accounts use User access.");
+  setProfileMessage("Role is controlled by admins. Add a display name and primary position to complete your player profile.");
 }
 
 function setProfileMessage(message, isError = false) {
