@@ -329,7 +329,7 @@ export function normalizeMatchMetadata(match = {}) {
   ));
   const createdAt = firstPresent(match.createdAt, match.created_at, match.dateTime, match.date);
   const updatedAt = firstPresent(match.updatedAt, match.updated_at, match.editedAt, match.edited_at);
-  const hasBeenEdited = hasRealMatchEdit(match, { createdAt, updatedAt, updatedBy });
+  const hasBeenEdited = hasRealMatchEdit(match, { createdBy, createdAt, updatedBy, updatedAt });
 
   return {
     createdBy,
@@ -357,9 +357,10 @@ function hasRealMatchEdit(match = {}, metadata = {}) {
   const editHistory = Array.isArray(match.editHistory) ? match.editHistory : [];
   if (editHistory.some((entry) => entry?.action && entry.action !== "match_created")) return true;
   if (editHistory.some((entry) => entry?.action === "match_created")) return false;
-  if (!metadata.updatedBy && !metadata.updatedAt) return false;
-  if (!metadata.updatedAt || !metadata.createdAt) return Boolean(metadata.updatedBy);
-  return new Date(metadata.updatedAt).getTime() !== new Date(metadata.createdAt).getTime();
+  if (!metadata.updatedBy) return false;
+  if (metadata.updatedBy !== metadata.createdBy) return true;
+  if (!metadata.updatedAt || !metadata.createdAt) return false;
+  return new Date(metadata.updatedAt).getTime() > new Date(metadata.createdAt).getTime();
 }
 
 export function getCurrentUser() {

@@ -1605,7 +1605,7 @@ function createHistoryCard(match) {
       ${match.managerName ? `<p>Manager: ${escapeHtml(match.managerName)}${managerHistoryTeam(match, teamAName, teamBName)}</p>` : ""}
       <div class="audit-meta">
         <span>Created by ${escapeHtml(metadata.createdByLabel)}</span>
-        ${metadata.hasBeenEdited ? `<span>Last edited by ${escapeHtml(metadata.updatedByLabel)}</span>` : ""}
+        ${metadata.hasBeenEdited && metadata.updatedByLabel ? `<span>Last edited by ${escapeHtml(metadata.updatedByLabel)}</span>` : ""}
       </div>
     </div>
     <div class="row-actions history-actions">
@@ -1951,7 +1951,7 @@ function renderMatchDetailHeader(match) {
       <p>${formatReadableMatchWindow(match)}</p>
       <div class="audit-meta">
         <span>Created by ${escapeHtml(metadata.createdByLabel)}</span>
-        ${metadata.hasBeenEdited ? `<span>Last edited by ${escapeHtml(metadata.updatedByLabel)}</span>` : ""}
+        ${metadata.hasBeenEdited && metadata.updatedByLabel ? `<span>Last edited by ${escapeHtml(metadata.updatedByLabel)}</span>` : ""}
         ${editHistory.map((entry) => `<span>${escapeHtml(formatAuditAction(entry.action))} by ${escapeHtml(entry.byName || getUserName(entry.by))}</span>`).join("")}
       </div>
     </div>
@@ -2776,7 +2776,7 @@ function createUpcomingMatchCard(match, options = {}) {
       <p>${formatReadableMatchWindow(match)}</p>
       <div class="audit-meta">
         <span>Created by ${escapeHtml(metadata.createdByLabel)}</span>
-        ${metadata.hasBeenEdited ? `<span>Edited by ${escapeHtml(metadata.updatedByLabel)}</span>` : ""}
+        ${metadata.hasBeenEdited && metadata.updatedByLabel ? `<span>Edited by ${escapeHtml(metadata.updatedByLabel)}</span>` : ""}
       </div>
     </div>
     <button class="secondary" type="button">View Match</button>
