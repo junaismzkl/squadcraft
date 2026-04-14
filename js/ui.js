@@ -3,7 +3,7 @@ import { approveUserProfile, authState, canApproveUsers, canManageRoles, isAppro
 import { generateLineupPositions } from "./formation.js";
 import { clearLiveTimer, renderLiveMatch } from "./liveMatch.js";
 import { deleteSharedMatch } from "./matchStore.js";
-import { loadSharedPlayersIntoState } from "./playerStore.js";
+import { deactivateProfilePlayer, loadSharedPlayersIntoState, updateProfilePlayerDetails, updateProfilePlayerRole } from "./playerStore.js";
 import {
   getMatchSettings,
   normalizeCaptains,
@@ -285,82 +285,44 @@ export async function openUserManagement() {
 
 export async function savePlayerFromForm(event) {
   event.preventDefault();
-  alert("Permanent players now come from approved user profiles. Use Profile Setup to update player details.");
-  resetPlayerForm();
-  return;
   const name = els.playerName.value.trim();
   const positions = getSelectedFormPositions(
     els.playerRole.value,
     els.playerPosition.value,
     els.playerPositionThird.value
   );
-  const isGuest = els.playerGuest.checked;
   const editingId = els.editingPlayerId.value;
   if (!name) return;
   const existingPlayer = state.data.players.find((item) => item.id === editingId);
   const image = imageDrafts.player || existingPlayer?.image || "";
-  const currentUser = getCurrentUser();
-  if (!currentUser || !hasPermission("editOwnPlayer", currentUser)) {
-    alert("Sign in before creating or editing players.");
-    return;
-  }
-  const now = new Date().toISOString();
-
-  if (editingId) {
-    if (!existingPlayer || !canEditPlayer(existingPlayer, currentUser)) {
-      alert("You can only edit your own player card.");
+  if (existingPlayer?.profileBacked) {
+    if (!canEditProfileBackedPlayer(existingPlayer)) {
+      alert("You do not have permission to edit this profile player.");
       return;
     }
-
-    const nextRating = canRatePlayer(existingPlayer, currentUser)
-      ? clampRating(els.playerRating.value)
-      : clampRating(existingPlayer.rating);
-    setPlayers(
-      state.data.players.map((player) =>
-        player.id === editingId
-          ? {
-              ...player,
-              name,
-              rating: nextRating,
-              positions,
-              role: positions.primary,
-              position: positions.secondary || "",
-              image,
-              isGuest,
-              updatedBy: currentUser.id,
-              updatedAt: now,
-              approvalStatus: player.approvalStatus === "approved" && canApprovePlayer(currentUser) ? "approved" : player.approvalStatus
-            }
-          : player
-      )
-    );
-    logActivity("player_edited", "player", editingId, { name });
-    if (nextRating !== clampRating(existingPlayer.rating)) {
-      logActivity("player_rating_changed", "player", editingId, {
-        from: clampRating(existingPlayer.rating),
-        to: nextRating
-      });
+    const result = await updateProfilePlayerDetails(existingPlayer.profileId || existingPlayer.id, {
+      name,
+      displayName: name,
+      rating: els.playerRating.value,
+      primaryPosition: positions.primary,
+      secondaryPosition: positions.secondary,
+      thirdPosition: positions.tertiary,
+      dominantFoot: els.playerDominantFoot?.value || "",
+      jerseyNumber: els.playerJerseyNumber?.value || "",
+      avatarUrl: image
+    });
+    if (!result.ok) {
+      alert(result.message || "Could not save player details.");
+      return;
     }
-  } else {
-    const player = createPlayer({ name, rating: els.playerRating.value, positions, image, isGuest });
-    addPlayer(player);
-    logActivity("player_created", "player", player.id, { name, approvalStatus: player.approvalStatus });
-    if (player.approvalStatus === "pending") {
-      addNotification({
-        id: `player-approval-${player.id}`,
-        playerId: player.id,
-        userId: currentUser.id,
-        type: "player_approval_pending",
-        message: "Your player is waiting for admin approval",
-        read: false,
-        createdAt: now
-      });
-    }
+    logActivity("profile_player_edited", "profile", existingPlayer.profileId || existingPlayer.id, { name });
+    resetPlayerForm();
+    render();
+    return;
   }
 
-  persist();
+  alert("Permanent players now come from approved user profiles. Use Profile Setup to update player details.");
   resetPlayerForm();
-  render();
 }
 
 export function showPlayerForm() {
@@ -408,9 +370,12 @@ export function resetPlayerForm() {
   els.playerRole.value = "CM";
   els.playerPosition.value = "";
   els.playerPositionThird.value = "";
+  if (els.playerDominantFoot) els.playerDominantFoot.value = "";
+  if (els.playerJerseyNumber) els.playerJerseyNumber.value = "";
   els.playerImage.value = "";
   imageDrafts.player = "";
   els.playerGuest.checked = false;
+  els.playerGuest.closest("label")?.classList.remove("hidden");
   isPlayerFormVisible = false;
   syncPlayerFormVisibility();
 }
@@ -418,7 +383,11 @@ export function resetPlayerForm() {
 export function editPlayer(id) {
   const player = state.data.players.find((item) => item.id === id);
   if (!player) return;
-  if (!canEditPlayer(player)) {
+  if (player.profileBacked && !canEditProfileBackedPlayer(player)) {
+    alert("You do not have permission to edit this profile player.");
+    return;
+  }
+  if (!player.profileBacked && !canEditPlayer(player)) {
     alert("You can only edit your own player card.");
     return;
   }
@@ -426,13 +395,16 @@ export function editPlayer(id) {
   els.editingPlayerId.value = player.id;
   els.playerName.value = player.name;
   els.playerRating.value = clampRating(player.rating);
-  els.playerRating.disabled = !canRatePlayer(player);
+  els.playerRating.disabled = player.profileBacked ? false : !canRatePlayer(player);
   els.playerRole.value = getPrimaryPosition(player);
   els.playerPosition.value = player.positions?.secondary || player.position || "";
   els.playerPositionThird.value = player.positions?.tertiary || "";
+  if (els.playerDominantFoot) els.playerDominantFoot.value = player.dominantFoot || "";
+  if (els.playerJerseyNumber) els.playerJerseyNumber.value = player.jerseyNumber || "";
   els.playerImage.value = "";
-  els.playerGuest.checked = player.isGuest;
-  els.playerForm.querySelector(".primary").textContent = "Save Player";
+  els.playerGuest.checked = false;
+  els.playerGuest.closest("label")?.classList.toggle("hidden", Boolean(player.profileBacked));
+  els.playerForm.querySelector(".primary").textContent = player.profileBacked ? "Save Profile Player" : "Save Player";
   syncPlayerFormVisibility();
   switchTab("players");
   els.playerName.focus();
@@ -451,6 +423,10 @@ export function openMatchInViewMode(match, options = {}) {
 export function deletePlayer(id) {
   const player = state.data.players.find((item) => item.id === id);
   if (!player) return;
+  if (player.profileBacked) {
+    deactivateProfileBackedPlayer(id);
+    return;
+  }
   if (!canDeletePlayer(player)) {
     alert("You do not have permission to delete this player.");
     return;
@@ -461,6 +437,54 @@ export function deletePlayer(id) {
   clearTeams();
   logActivity("player_deleted", "player", id, { name: player.name });
   persist();
+  render();
+}
+
+async function changeProfileBackedPlayerRole(playerId, role) {
+  const player = state.data.players.find((item) => item.id === playerId);
+  if (!player?.profileBacked) return;
+  if (!canManageRoles()) {
+    alert("Only super admins can change roles.");
+    renderPlayers();
+    return;
+  }
+  if (!["user", "admin"].includes(role)) {
+    alert("Role can only be changed to user or admin here.");
+    renderPlayers();
+    return;
+  }
+  if (player.profileRole === "super_admin") {
+    alert("Super admin roles cannot be changed from Player Management.");
+    renderPlayers();
+    return;
+  }
+
+  const result = await updateProfilePlayerRole(player.profileId || player.id, role);
+  if (!result.ok) {
+    alert(result.message || "Could not update role.");
+    renderPlayers();
+    return;
+  }
+  logActivity("profile_role_changed", "profile", player.profileId || player.id, { role });
+  render();
+}
+
+async function deactivateProfileBackedPlayer(playerId) {
+  const player = state.data.players.find((item) => item.id === playerId);
+  if (!player?.profileBacked) return;
+  if (!canManageRoles()) {
+    alert("Only super admins can deactivate profile players.");
+    return;
+  }
+  if (!confirm(`Deactivate ${player.name}? This sets the profile to inactive and removes the player from active lists.`)) return;
+
+  const result = await deactivateProfilePlayer(player.profileId || player.id);
+  if (!result.ok) {
+    alert(result.message || "Could not deactivate player.");
+    return;
+  }
+  removeSelectedPlayerId(player.id);
+  logActivity("profile_player_deactivated", "profile", player.profileId || player.id, { name: player.name });
   render();
 }
 
@@ -835,6 +859,8 @@ export function renderPlayers() {
     const card = createPlayerCard(player, { actions: isManagePlayersMode && canManagePlayers() ? "manage" : "" });
     card.querySelector('[data-action="edit"]')?.addEventListener("click", () => editPlayer(player.id));
     card.querySelector('[data-action="delete"]')?.addEventListener("click", () => deletePlayer(player.id));
+    card.querySelector('[data-action="deactivate-profile"]')?.addEventListener("click", () => deactivateProfileBackedPlayer(player.id));
+    card.querySelector("[data-profile-role]")?.addEventListener("change", (event) => changeProfileBackedPlayerRole(player.id, event.target.value));
     card.querySelector('[data-action="approve"]')?.addEventListener("click", () => approvePlayer(player.id));
     els.playersList.appendChild(card);
   });
@@ -874,6 +900,12 @@ function toggleManagePlayersMode() {
   if (!canManagePlayers()) return;
   isManagePlayersMode = !isManagePlayersMode;
   renderPlayers();
+}
+
+function canEditProfileBackedPlayer(player) {
+  if (!player?.profileBacked) return false;
+  if (player.profileRole === "super_admin" && !canManageRoles()) return false;
+  return canManageRoles() || canManagePlayers();
 }
 
 function getVisiblePlayersForCurrentUser() {
@@ -1062,8 +1094,29 @@ export function createPlayerCard(player, options = {}) {
 }
 
 export function cardActionMarkup(player, options) {
-  if (player.profileBacked) return "";
   if (options.actions === "manage") {
+    if (player.profileBacked) {
+      const actions = [];
+      if (canEditProfileBackedPlayer(player)) {
+        actions.push('<button class="icon-button" type="button" data-action="edit">Edit Details</button>');
+      }
+      if (canManageRoles() && player.profileRole !== "super_admin") {
+        actions.push(`
+          <select data-profile-role aria-label="Player role">
+            <option value="user" ${player.profileRole === "user" ? "selected" : ""}>User</option>
+            <option value="admin" ${player.profileRole === "admin" ? "selected" : ""}>Admin</option>
+          </select>
+        `);
+        actions.push('<button class="icon-button delete" type="button" data-action="deactivate-profile">Deactivate</button>');
+      }
+      if (!actions.length) return "";
+      return `
+        <div class="row-actions player-card-actions">
+          ${actions.join("")}
+        </div>
+      `;
+    }
+
     const actions = [];
     if (canEditPlayer(player) && player.approvalStatus === "approved") {
       actions.push('<button class="icon-button" type="button" data-action="edit">Edit</button>');
@@ -1671,8 +1724,10 @@ function renderHomeFeedback() {
 }
 
 function syncPlayerFormVisibility() {
-  isPlayerFormVisible = false;
-  els.playerForm.classList.add("hidden");
+  const editingPlayer = state.data.players.find((player) => player.id === els.editingPlayerId.value);
+  const canShowProfileEdit = Boolean(isPlayerFormVisible && editingPlayer?.profileBacked && canEditProfileBackedPlayer(editingPlayer));
+  if (!canShowProfileEdit) isPlayerFormVisible = false;
+  els.playerForm.classList.toggle("hidden", !canShowProfileEdit);
   els.showPlayerForm.classList.add("hidden");
 }
 

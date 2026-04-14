@@ -249,8 +249,7 @@ function normalizeDominantFoot(value) {
 
 function normalizeJerseyNumber(value) {
   if (value === "" || value === null || value === undefined) return null;
-  const number = Math.floor(Number(value));
-  return Number.isFinite(number) && number >= 0 && number <= 99 ? number : null;
+  return String(value || "").trim().slice(0, 2) || null;
 }
 
 export async function loadPendingProfiles() {

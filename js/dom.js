@@ -51,6 +51,8 @@ export const els = {
   playerRole: document.querySelector("#player-role"),
   playerPosition: document.querySelector("#player-position"),
   playerPositionThird: document.querySelector("#player-position-third"),
+  playerDominantFoot: document.querySelector("#player-dominant-foot"),
+  playerJerseyNumber: document.querySelector("#player-jersey-number"),
   playerImage: document.querySelector("#player-image"),
   playerGuest: document.querySelector("#player-guest"),
   cancelEditPlayer: document.querySelector("#cancel-edit-player"),
