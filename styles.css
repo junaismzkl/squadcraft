@@ -478,7 +478,7 @@ main {
   width: 31px;
   height: 31px;
   display: block;
-  fill: currentColor;
+  object-fit: contain;
 }
 
 .notifications-panel {
