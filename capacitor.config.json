@@ -1,0 +1,12 @@
+{
+  "appId": "com.squadcraft.app",
+  "appName": "SquadCraft",
+  "webDir": ".",
+  "server": {
+    "url": "https://squadcraft.pages.dev",
+    "cleartext": false
+  },
+  "android": {
+    "path": "android"
+  }
+}

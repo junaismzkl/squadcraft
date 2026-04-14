@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SquadCraft</string>
+    <string name="title_activity_main">SquadCraft</string>
+    <string name="package_name">com.squadcraft.app</string>
+    <string name="custom_url_scheme">com.squadcraft.app</string>
+</resources>
