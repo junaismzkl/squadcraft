@@ -47,6 +47,7 @@ const TEAM_B_Y = {
 };
 
 const FORMATION_ROLE_SLOTS = {
+  "2-2": ["GK", "CB", "WB", "WF", "CF"],
   "2-1-1": ["GK", "CB", "WB", "CM", "CF"],
   "1-2-1": ["GK", "CB", "CM", "CM", "CF"],
   "2-2-1": ["GK", "CB", "WB", "CM", "CM", "CF"],
@@ -60,9 +61,11 @@ const FORMATION_ROLE_SLOTS = {
   "3-3-1": ["GK", "WB", "CB", "WB", "CM", "CM", "WF", "CF"],
   "2-3-2": ["GK", "CB", "WB", "CM", "CM", "WF", "WF", "CF"],
   "2-2-3": ["GK", "CB", "WB", "CM", "CM", "WF", "CF", "WF"],
+  "3-2-3": ["GK", "WB", "CB", "WB", "CM", "CM", "WF", "CF", "WF"],
   "3-3-2": ["GK", "WB", "CB", "WB", "CM", "CM", "CM", "WF", "CF"],
   "4-3-1": ["GK", "WB", "CB", "CB", "WB", "CM", "CM", "CM", "CF"],
   "3-4-1": ["GK", "WB", "CB", "WB", "CM", "CM", "WF", "WF", "CF"],
+  "4-2-3": ["GK", "WB", "CB", "CB", "WB", "CM", "CM", "WF", "CF", "WF"],
   "4-3-2": ["GK", "WB", "CB", "CB", "WB", "CM", "CM", "CM", "WF", "CF"],
   "3-4-2": ["GK", "WB", "CB", "WB", "CM", "CM", "WF", "WF", "CF", "CF"],
   "4-4-2": ["GK", "WB", "CB", "CB", "WB", "CM", "CM", "WF", "WF", "CF", "CF"],
@@ -71,6 +74,16 @@ const FORMATION_ROLE_SLOTS = {
   "3-5-2": ["GK", "WB", "CB", "WB", "CM", "CM", "CM", "WF", "WF", "CF", "CF"],
   "3-4-3": ["GK", "WB", "CB", "WB", "CM", "CM", "WF", "WF", "WF", "CF", "CF"],
   "4-1-4-1": ["GK", "WB", "CB", "CB", "WB", "CM", "CM", "WF", "CM", "WF", "CF"]
+};
+
+const REQUIRED_FORMATIONS_BY_SIZE = {
+  5: ["2-2"],
+  6: ["2-2-1"],
+  7: ["3-1-2"],
+  8: ["3-1-3"],
+  9: ["3-2-3"],
+  10: ["4-2-3"],
+  11: ["4-3-3"]
 };
 
 export function parseFormation(formationStr) {
@@ -87,7 +100,10 @@ export function parseFormation(formationStr) {
 }
 
 export function getFormationOptions(teamSize) {
-  const preferred = [...(formationsBySize[teamSize] || [])].filter((formation) => isValidFormationString(formation, teamSize));
+  const preferred = [
+    ...(REQUIRED_FORMATIONS_BY_SIZE[teamSize] || []),
+    ...(formationsBySize[teamSize] || [])
+  ].filter((formation, index, formations) => formations.indexOf(formation) === index && isValidFormationString(formation, teamSize));
   if (preferred.length) return preferred;
   return teamSize > 1 ? ["1-1-1"] : ["0-0-0"];
 }
@@ -252,7 +268,7 @@ function isValidFormationString(formationStr, teamSize) {
   const outfield = Math.max(0, teamSize - 1);
   const total = parsed.parts.reduce((sum, value) => sum + value, 0);
   if (outfield === 0) return total === 0;
-  if (parsed.parts.length < 3) return false;
+  if (parsed.parts.length < 2) return false;
   return total === outfield
     && parsed.parts[0] >= 1
     && parsed.parts[parsed.parts.length - 1] >= 1

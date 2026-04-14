@@ -6,7 +6,16 @@ export const EIGHT_V_EIGHT_SLOTS = ["GK", "WB", "CB", "WB", "CM", "WF", "CF", "W
 export const MAX_TEAM_RATING_DIFF = 8;
 
 const SUPPORTED_TEAM_SIZES = new Set([5, 6, 7, 8, 9, 10, 11]);
-const ROLE_DRAFT_ORDER = ["GK", "CB", "WB", "CM", "CF", "WF"];
+const ROLE_DRAFT_ORDER = ["GK", "CB", "WB", "CM", "WF", "CF"];
+const ROLE_ANCHOR_TEAM = {
+  GK: "A",
+  CB: "B",
+  WB: "A",
+  CM: "A",
+  WF: "B",
+  CF: "B"
+};
+const EXTREME_DRAFT_ROLES = new Set(["WB", "WF"]);
 const FALLBACK_ROLE_MAP = {
   GK: [],
   CB: ["WB", "CM"],
@@ -320,42 +329,44 @@ export function pickAlternatingHighLow(candidates, count) {
   return selected;
 }
 
+function pickAnchorSet(candidates, role, count) {
+  if (count <= 0) return [];
+  if (count === 1) return [pickStrongest(candidates)].filter(Boolean);
+  if (EXTREME_DRAFT_ROLES.has(role)) return pickAlternatingHighLow(candidates, count);
+
+  const strongest = pickStrongest(candidates);
+  const remaining = withoutPlayers(candidates, [strongest]);
+  return [
+    strongest,
+    ...pickAlternatingHighLow(remaining, count - 1)
+  ].filter(Boolean);
+}
+
+function pickBalancedSupportSet(candidates, count) {
+  if (count <= 0) return [];
+  if (count === 1) return [pickStrongest(candidates)].filter(Boolean);
+  return pickMedianSet(candidates, count);
+}
+
 export function distributeRoleAcrossTeams(role, candidates, countA, countB) {
-  if (role === "GK") {
-    const teamA = takePlayers(candidates, [pickStrongest(candidates)], countA);
-    const remaining = withoutPlayers(candidates, teamA);
-    const teamB = takePlayers(remaining, pickAlternatingHighLow(remaining, countB), countB);
-    return { teamA, teamB };
-  }
+  const anchorTeam = ROLE_ANCHOR_TEAM[role] || "A";
+  const anchorCount = anchorTeam === "A" ? countA : countB;
+  const supportCount = anchorTeam === "A" ? countB : countA;
+  const anchorPlayers = takePlayers(
+    candidates,
+    pickAnchorSet(candidates, role, anchorCount),
+    anchorCount
+  );
+  const remaining = withoutPlayers(candidates, anchorPlayers);
+  const supportPlayers = takePlayers(
+    remaining,
+    pickBalancedSupportSet(remaining, supportCount),
+    supportCount
+  );
 
-  if (countA === 1 && countB === 1) {
-    if (role === "CB" || role === "CM") {
-      const teamA = takePlayers(candidates, [pickWeakest(candidates)], countA);
-      const remaining = withoutPlayers(candidates, teamA);
-      const teamB = takePlayers(remaining, [pickStrongest(remaining)], countB);
-      return { teamA, teamB };
-    }
-
-    const teamA = takePlayers(candidates, [pickStrongest(candidates)], countA);
-    const remaining = withoutPlayers(candidates, teamA);
-    const teamB = takePlayers(remaining, [pickStrongest(remaining)], countB);
-    return { teamA, teamB };
-  }
-
-  if (countA === 2 && countB === 2) {
-    const strongest = pickStrongest(candidates);
-    const afterStrongest = withoutPlayers(candidates, [strongest]);
-    const weakest = pickWeakest(afterStrongest);
-    const teamA = takePlayers(candidates, [strongest, weakest], countA);
-    const remaining = withoutPlayers(candidates, teamA);
-    const teamB = takePlayers(remaining, pickMedianSet(remaining, countB), countB);
-    return { teamA, teamB };
-  }
-
-  const teamA = takePlayers(candidates, pickAlternatingHighLow(candidates, countA), countA);
-  const remaining = withoutPlayers(candidates, teamA);
-  const teamB = takePlayers(remaining, pickMedianSet(remaining, countB), countB);
-  return { teamA, teamB };
+  return anchorTeam === "A"
+    ? { teamA: anchorPlayers, teamB: supportPlayers }
+    : { teamA: supportPlayers, teamB: anchorPlayers };
 }
 
 export function assignSlotsFromRolePicks(slotArray, pickedPlayersByRole) {
