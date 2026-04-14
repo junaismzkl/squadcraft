@@ -87,7 +87,10 @@ export function generateTeams(matchTime = "", reshuffle = false, options = {}) {
       || String(a.name || "").localeCompare(String(b.name || ""))
       || String(a.id || "").localeCompare(String(b.id || ""))
     ));
-    const generatedTeams = makeBalancedTeams(pool, settings.formation, { forceFallback: options.forceFallback });
+    const generatedTeams = makeBalancedTeams(pool, settings.formation, {
+      forceFallback: options.forceFallback,
+      forcePreferredFormation: true
+    });
     if (!generatedTeams.ok) {
       if (!options.forceFallback && generatedTeams.canForceFallback) {
         const teamSize = matchPlayers.length / 2;

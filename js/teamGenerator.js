@@ -30,7 +30,9 @@ export function generateBalancedTeams(players, formationStr = "", options = {}) 
   const teamSize = players.length / 2;
 
   if (Number.isInteger(teamSize) && SUPPORTED_TEAM_SIZES.has(teamSize)) {
-    const formationOptions = getFormationOptions(teamSize);
+    const formationOptions = options.forcePreferredFormation && formationStr
+      ? [formationStr]
+      : getFormationOptions(teamSize);
     if (options.forceFallback) {
       return generateFallbackTeams(players, formationStr, teamSize, formationOptions);
     }
@@ -270,6 +272,7 @@ export function sortCandidatesDeterministic(candidates, role, direction = "desc"
     .filter((candidate) => candidate.role === role)
     .sort((a, b) => (
       getMatchRank(a) - getMatchRank(b)
+      || getScoreDelta(a, b, ratingDirection)
       || ratingDirection * (getRating(a.player) - getRating(b.player))
       || getPlayerName(a.player).localeCompare(getPlayerName(b.player))
       || getPlayerId(a.player).localeCompare(getPlayerId(b.player))
@@ -655,37 +658,39 @@ function assignBestPossibleLineups(players, slotArray) {
   }
 
   const availablePlayers = [...players].sort(comparePlayersByRating);
-  const combinedSlots = [
-    ...slotArray.map((position, index) => ({ team: "A", index, position, player: null })),
-    ...slotArray.map((position, index) => ({ team: "B", index, position, player: null }))
-  ];
-  const assignmentOrder = getFallbackSlotAssignmentOrder(combinedSlots, availablePlayers);
+  const roleCounts = getRoleCounts(slotArray);
+  const pickedA = createRolePickMap(slotArray);
+  const pickedB = createRolePickMap(slotArray);
   let score = 0;
 
-  for (const slot of assignmentOrder) {
-    const candidates = getFallbackCandidates(availablePlayers, slot.position);
-    const candidate = candidates[0];
+  for (const role of getScarcitySortedRoles(roleCounts, availablePlayers)) {
+    const countA = roleCounts[role] || 0;
+    const countB = roleCounts[role] || 0;
+    if (!countA && !countB) continue;
 
-    if (!candidate) {
+    const candidates = getFallbackCandidates(availablePlayers, role);
+    if (candidates.length < countA + countB) {
       return { ok: false, score: 0, lineupA: [], lineupB: [] };
     }
 
-    slot.player = withAssignedPosition(candidate.player, slot.position, candidate.assignmentType);
-    score += candidate.score;
-    removeAssignedPlayer(availablePlayers, candidate.player.id);
+    const distribution = distributeRoleAcrossTeams(role, candidates, countA, countB);
+    pickedA[role].push(...distribution.teamA);
+    pickedB[role].push(...distribution.teamB);
+    [...distribution.teamA, ...distribution.teamB].forEach((player) => {
+      const candidate = candidates.find((item) => item.player.id === player.id);
+      score += candidate?.score || 0;
+      removeAssignedPlayer(availablePlayers, player.id);
+    });
   }
 
+  const lineupA = assignSlotsFromRolePicks(slotArray, pickedA);
+  const lineupB = assignSlotsFromRolePicks(slotArray, pickedB);
+
   return {
-    ok: combinedSlots.every((slot) => slot.player),
+    ok: lineupA.every((slot) => slot.player) && lineupB.every((slot) => slot.player),
     score,
-    lineupA: combinedSlots
-      .filter((slot) => slot.team === "A")
-      .sort((a, b) => a.index - b.index)
-      .map(({ position, player }) => ({ position, player })),
-    lineupB: combinedSlots
-      .filter((slot) => slot.team === "B")
-      .sort((a, b) => a.index - b.index)
-      .map(({ position, player }) => ({ position, player }))
+    lineupA,
+    lineupB
   };
 }
 
@@ -903,5 +908,16 @@ function getPlayerId(player) {
 }
 
 function getMatchRank(candidate) {
-  return candidate?.matchType === "primary" ? 0 : 1;
+  if (candidate?.matchType === "primary" || candidate?.assignmentType === "exact_primary") return 0;
+  if (candidate?.matchType === "secondary" || candidate?.assignmentType === "exact_secondary") return 1;
+  if (candidate?.assignmentType === "fallback_near_fit") return 2;
+  if (candidate?.assignmentType === "forced_goalkeeper_outfield") return 3;
+  return 4;
+}
+
+function getScoreDelta(a, b, ratingDirection) {
+  const scoreA = Number(a?.score);
+  const scoreB = Number(b?.score);
+  if (!Number.isFinite(scoreA) || !Number.isFinite(scoreB)) return 0;
+  return ratingDirection * (scoreA - scoreB);
 }
