@@ -43,12 +43,21 @@ export async function loadSharedMatchesIntoState() {
 
 export async function saveSharedMatch(localMatch) {
   if (!authState.isAuthenticated || !authState.currentProfile?.id || !localMatch?.id) {
+    console.warn("Skipping Supabase match save because auth or local match data is missing.", {
+      isAuthenticated: authState.isAuthenticated,
+      profileId: authState.currentProfile?.id || "",
+      matchId: localMatch?.id || ""
+    });
     return { ok: false, message: "Sign in before saving matches." };
   }
 
-  const { data: savedMatch, error: matchError } = await saveMatchRow(localMatch, true);
+  const isExistingRemoteMatch = isUuid(localMatch.id);
+  const { data: savedMatch, error: matchError } = await saveMatchRow(localMatch);
   if (matchError) {
-    console.warn("Could not save shared match to Supabase.", matchError);
+    console.error("Could not insert shared match into Supabase.", {
+      error: matchError,
+      row: localMatchToRemoteMatch(localMatch)
+    });
     return { ok: false, message: matchError.message };
   }
 
@@ -58,14 +67,16 @@ export async function saveSharedMatch(localMatch) {
     localMatch = { ...localMatch, id: remoteMatchId };
   }
 
-  const { error: deleteError } = await supabase
-    .from(MATCH_PLAYERS_TABLE)
-    .delete()
-    .eq("match_id", remoteMatchId);
+  if (isExistingRemoteMatch) {
+    const { error: deleteError } = await supabase
+      .from(MATCH_PLAYERS_TABLE)
+      .delete()
+      .eq("match_id", remoteMatchId);
 
-  if (deleteError) {
-    console.warn("Could not replace shared match players in Supabase.", deleteError);
-    return { ok: false, message: deleteError.message };
+    if (deleteError) {
+      console.warn("Could not replace shared match players in Supabase.", deleteError);
+      return { ok: false, message: deleteError.message };
+    }
   }
 
   const playerRows = localMatchPlayersToRemoteRows(localMatch, remoteMatchId);
@@ -75,7 +86,10 @@ export async function saveSharedMatch(localMatch) {
       .insert(playerRows);
 
     if (playerError) {
-      console.warn("Could not save shared match players to Supabase.", playerError);
+      console.error("Could not insert shared match players into Supabase.", {
+        error: playerError,
+        rows: playerRows
+      });
       return { ok: false, message: playerError.message };
     }
   }
@@ -83,26 +97,27 @@ export async function saveSharedMatch(localMatch) {
   return { ok: true, match: savedMatch };
 }
 
-async function saveMatchRow(localMatch, includeEditor) {
-  const matchRow = localMatchToRemoteMatch(localMatch, { includeEditor });
+async function saveMatchRow(localMatch) {
+  const matchRow = localMatchToRemoteMatch(localMatch);
   const query = isUuid(localMatch.id)
     ? supabase.from(MATCHES_TABLE).upsert({ ...matchRow, id: localMatch.id }).select("*").single()
     : supabase.from(MATCHES_TABLE).insert(matchRow).select("*").single();
-  const result = await query;
-
-  if (includeEditor && result.error && isMissingEditorColumnError(result.error)) {
-    return saveMatchRow(localMatch, false);
-  }
-
-  return result;
+  return query;
 }
 
 export async function syncMatchToSupabase(localMatch) {
-  const result = await saveSharedMatch(localMatch);
-  if (!result.ok) {
+  try {
+    const result = await saveSharedMatch(localMatch);
+    if (!result.ok) {
+      window.dispatchEvent(new CustomEvent("match:sync-error", { detail: result }));
+    }
+    return result;
+  } catch (error) {
+    const result = { ok: false, message: error?.message || "Could not sync match to Supabase." };
+    console.error("Unexpected match Supabase sync failure.", error);
     window.dispatchEvent(new CustomEvent("match:sync-error", { detail: result }));
+    return result;
   }
-  return result;
 }
 
 export async function deleteSharedMatch(matchId) {
@@ -137,16 +152,14 @@ async function loadMatchPlayerRows(matchIds) {
   const nestedResult = await supabase
     .from(MATCH_PLAYERS_TABLE)
     .select("*, profiles:profile_id(id, name, avatar_url, role)")
-    .in("match_id", matchIds)
-    .order("created_at", { ascending: true });
+    .in("match_id", matchIds);
 
   if (!nestedResult.error) return { ok: true, rows: nestedResult.data || [] };
 
   const flatResult = await supabase
     .from(MATCH_PLAYERS_TABLE)
     .select("*")
-    .in("match_id", matchIds)
-    .order("created_at", { ascending: true });
+    .in("match_id", matchIds);
 
   return flatResult.error
     ? { ok: false, rows: [], error: flatResult.error }
@@ -189,22 +202,17 @@ async function loadMatchAuditProfiles(matchRows) {
   return new Map((data || []).map((profile) => [profile.id, profile]));
 }
 
-function localMatchToRemoteMatch(match, options = {}) {
+function localMatchToRemoteMatch(match) {
   const now = new Date().toISOString();
   const metadata = normalizeMatchMetadata(match);
-  const row = {
+  return {
     title: match.title || `${match.teamAName || "Team A"} vs ${match.teamBName || "Team B"}`,
     match_date: match.startTime || match.dateTime || now,
     location: match.location || "",
     status: match.status || "upcoming",
     created_by: metadata.createdBy || authState.currentProfile.id,
-    created_at: metadata.createdAt || now,
-    updated_at: now
+    created_at: metadata.createdAt || now
   };
-  if (options.includeEditor !== false) {
-    row.updated_by = authState.currentProfile.id;
-  }
-  return row;
 }
 
 function localMatchPlayersToRemoteRows(match, matchId) {
@@ -223,11 +231,7 @@ function appendTeamRows(rows, players, matchId, team) {
       profile_id: profileId,
       guest_name: isGuest ? player.name || "Guest" : null,
       guest_position: isGuest ? getPlayerRoleLabel(player) : null,
-      team,
-      role_label: getPlayerRoleLabel(player),
-      is_guest: isGuest,
-      created_by: authState.currentProfile?.id || "",
-      created_at: player.createdAt || new Date().toISOString()
+      team
     });
   });
 }
@@ -281,13 +285,14 @@ function getProfileName(profile) {
 
 function remoteMatchPlayerToLocal(row) {
   const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
-  const isGuest = Boolean(row.is_guest);
+  const isGuest = Boolean(row.is_guest) || (!row.profile_id && Boolean(row.guest_name));
+  const roleLabel = row.role_label || row.guest_position || profile?.role || "CM";
   return normalizePlayerRecord({
     id: isGuest ? `guest-${row.id}` : row.profile_id,
     profileId: row.profile_id || "",
     name: isGuest ? row.guest_name || "Guest" : profile?.name || "Registered Player",
-    positions: { primary: row.role_label || row.guest_position || "CM" },
-    role: row.role_label || row.guest_position || "CM",
+    positions: { primary: roleLabel },
+    role: roleLabel,
     image: profile?.avatar_url || "",
     isGuest,
     ownerUserId: row.profile_id || "",
@@ -327,11 +332,6 @@ function replaceLocalMatchId(oldId, newId) {
 
 function isUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
-}
-
-function isMissingEditorColumnError(error) {
-  const message = String(error?.message || "").toLowerCase();
-  return message.includes("updated_by") && (message.includes("schema cache") || message.includes("column"));
 }
 
 function isMissingProfileDisplayNameError(error) {
