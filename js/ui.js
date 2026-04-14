@@ -99,6 +99,7 @@ let isManagePlayersMode = false;
 let editActionMode = null;
 let activeEditSelection = null;
 let editActionMessage = "";
+let showLiveMatchScreen = true;
 let activeStatsTab = "goals";
 let editingMatchSnapshot = null;
 let hasPendingMatchEdits = false;
@@ -177,6 +178,7 @@ export function renderHome() {
     `;
     card.querySelector("button").addEventListener("click", () => {
       restoreUpcomingMatch(liveMatch);
+      showLiveMatchScreen = true;
       switchTab("match");
       render();
     });
@@ -427,6 +429,7 @@ export function openMatchInViewMode(match, options = {}) {
   isEditingMatch = false;
   editingMatchSnapshot = null;
   hasPendingMatchEdits = false;
+  showLiveMatchScreen = Boolean(options.openLive);
   matchWizardStep = 3;
   if (options.switchTab) switchTab("match");
   render();
@@ -1305,10 +1308,15 @@ export function renderTeams() {
   normalizeCaptains();
   normalizeTeamFormations();
 
-  if (isLiveMatch(state.currentTeams)) {
+  if (isLiveMatch(state.currentTeams) && showLiveMatchScreen) {
     els.matchFinishedModal.classList.add("hidden");
     els.resultForm.classList.add("hidden");
-    els.teamsArea.appendChild(renderLiveMatch(state.currentTeams));
+    els.teamsArea.appendChild(renderLiveMatch(state.currentTeams, {
+      onBack: () => {
+        showLiveMatchScreen = false;
+        renderMatchSection();
+      }
+    }));
     return;
   }
 

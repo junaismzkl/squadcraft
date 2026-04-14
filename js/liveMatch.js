@@ -6,7 +6,7 @@ import { escapeHtml } from "./utils.js";
 let liveTimerId = null;
 let highlightTimeoutId = null;
 
-export function renderLiveMatch(teams) {
+export function renderLiveMatch(teams, options = {}) {
   const card = document.createElement("section");
   card.className = "card live-match-screen";
   const highlightActive = Boolean(teams.lastGoal && Date.now() - Number(teams.lastGoal.timestamp || 0) < 2200);
@@ -16,6 +16,9 @@ export function renderLiveMatch(teams) {
   const teamBScore = scorerGoalTotal(teams.scorersB || []);
 
   card.innerHTML = `
+    <div class="live-match-nav">
+      <button class="secondary compact-button live-back-button" type="button" data-live-back>Back to Match</button>
+    </div>
     <div class="live-match-header">
       <div>
         <p class="live-label"><span class="live-dot"></span>LIVE MATCH</p>
@@ -76,6 +79,9 @@ export function renderLiveMatch(teams) {
     <button class="secondary full-width live-end-button" type="button">End Match</button>
   `;
 
+  card.querySelector("[data-live-back]")?.addEventListener("click", () => {
+    options.onBack?.();
+  });
   bindLiveEvents(card);
   bindLiveTimer(card.querySelector("[data-live-timer]"), matchStartTime(teams));
   scheduleHighlightRefresh(teams.lastGoal);

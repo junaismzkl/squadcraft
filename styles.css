@@ -1376,6 +1376,15 @@ select:focus {
   align-content: start;
 }
 
+.live-match-nav {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.live-back-button {
+  width: auto;
+}
+
 .live-match-header {
   display: flex;
   align-items: flex-start;
