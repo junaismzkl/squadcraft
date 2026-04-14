@@ -50,6 +50,7 @@ import {
   getPrimaryPosition,
   getMatchStatus,
   getMatchResult,
+  getMatchMetadata,
   getLiveMatch,
   getCurrentUser,
   getUserName,
@@ -1566,6 +1567,7 @@ function createHistoryCard(match) {
   const teamBName = match.teamBName || "Team B";
   const result = getMatchResult(match);
   const computedStatus = getMatchStatus(match);
+  const metadata = getMatchMetadata(match);
   const resultLabel = result
     ? result.scoreA > result.scoreB
       ? `${teamAName} won`
@@ -1602,8 +1604,8 @@ function createHistoryCard(match) {
       ${computedStatus === "completed" ? `<p>Scorers: ${scorersText(match)}</p>` : ""}
       ${match.managerName ? `<p>Manager: ${escapeHtml(match.managerName)}${managerHistoryTeam(match, teamAName, teamBName)}</p>` : ""}
       <div class="audit-meta">
-        <span>Created by ${escapeHtml(formatAuditUser(match.createdBy, match.createdByName))}</span>
-        <span>Last edited by ${escapeHtml(formatAuditUser(match.updatedBy || match.createdBy, match.updatedByName || match.createdByName))}</span>
+        <span>Created by ${escapeHtml(metadata.createdByLabel)}</span>
+        <span>Last edited by ${escapeHtml(metadata.updatedByLabel)}</span>
       </div>
     </div>
     <div class="row-actions history-actions">
@@ -1637,10 +1639,6 @@ function formatAuditAction(action) {
     .split(" ")
     .map(capitalizeLabel)
     .join(" ");
-}
-
-function formatAuditUser(userId, fallbackName = "") {
-  return fallbackName || getUserName(userId) || "Unknown";
 }
 
 function getRoleBadgeLabel(role) {
@@ -1944,14 +1942,15 @@ function renderMatchDetailHeader(match) {
   const card = document.createElement("article");
   card.className = "card match-detail-header";
   const editHistory = Array.isArray(match.editHistory) ? match.editHistory.slice(-3).reverse() : [];
+  const metadata = getMatchMetadata(match);
   card.innerHTML = `
     <div class="match-detail-copy">
       <p class="eyebrow">Match View</p>
       <h3>${escapeHtml(match.teamAName || "Team A")} vs ${escapeHtml(match.teamBName || "Team B")}</h3>
       <p>${formatReadableMatchWindow(match)}</p>
       <div class="audit-meta">
-        <span>Created by ${escapeHtml(formatAuditUser(match.createdBy, match.createdByName))}</span>
-        <span>Last edited by ${escapeHtml(formatAuditUser(match.updatedBy || match.createdBy, match.updatedByName || match.createdByName))}</span>
+        <span>Created by ${escapeHtml(metadata.createdByLabel)}</span>
+        <span>Last edited by ${escapeHtml(metadata.updatedByLabel)}</span>
         ${editHistory.map((entry) => `<span>${escapeHtml(formatAuditAction(entry.action))} by ${escapeHtml(entry.byName || getUserName(entry.by))}</span>`).join("")}
       </div>
     </div>
@@ -2768,14 +2767,15 @@ function formatNotificationTimestamp(value) {
 function createUpcomingMatchCard(match, options = {}) {
   const card = document.createElement("article");
   card.className = `card match-upcoming-card${options.isNextMatch ? " next-match-card" : ""}`;
+  const metadata = getMatchMetadata(match);
   card.innerHTML = `
     <div class="match-upcoming-copy">
       ${options.isNextMatch ? '<span class="pill">Next Match</span>' : ""}
       <strong>${escapeHtml(match.teamAName || "Team A")} vs ${escapeHtml(match.teamBName || "Team B")}</strong>
       <p>${formatReadableMatchWindow(match)}</p>
       <div class="audit-meta">
-        <span>Created by ${escapeHtml(formatAuditUser(match.createdBy, match.createdByName))}</span>
-        <span>Edited by ${escapeHtml(formatAuditUser(match.updatedBy || match.createdBy, match.updatedByName || match.createdByName))}</span>
+        <span>Created by ${escapeHtml(metadata.createdByLabel)}</span>
+        <span>Edited by ${escapeHtml(metadata.updatedByLabel)}</span>
       </div>
     </div>
     <button class="secondary" type="button">View Match</button>

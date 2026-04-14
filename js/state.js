@@ -266,6 +266,82 @@ export function getUserName(userId) {
   return getUserById(userId)?.name || "Unknown";
 }
 
+function firstPresent(...values) {
+  return values.find((value) => String(value || "").trim()) || "";
+}
+
+function cleanResolvedName(value) {
+  const name = String(value || "").trim();
+  return name.toLowerCase() === "unknown" ? "" : name;
+}
+
+function resolvedUserName(userId, fallbackName = "") {
+  return firstPresent(cleanResolvedName(fallbackName), cleanResolvedName(getUserById(userId)?.name));
+}
+
+export function normalizeMatchMetadata(match = {}) {
+  const createdBy = firstPresent(
+    match.createdBy,
+    match.created_by,
+    match.creatorId,
+    match.creator_id
+  );
+  const createdByName = resolvedUserName(createdBy, firstPresent(
+    match.createdByName,
+    match.created_by_name,
+    match.creatorName,
+    match.creator_name,
+    match.creator?.name,
+    match.creator?.display_name,
+    match.createdByProfile?.name,
+    match.createdByProfile?.display_name,
+    match.created_by_profile?.name,
+    match.created_by_profile?.display_name
+  ));
+  const updatedBy = firstPresent(
+    match.updatedBy,
+    match.updated_by,
+    match.editedBy,
+    match.edited_by,
+    match.editorId,
+    match.editor_id,
+    createdBy
+  );
+  const updatedByName = resolvedUserName(updatedBy, firstPresent(
+    match.updatedByName,
+    match.updated_by_name,
+    match.editedByName,
+    match.edited_by_name,
+    match.editorName,
+    match.editor_name,
+    match.editor?.name,
+    match.editor?.display_name,
+    match.updatedByProfile?.name,
+    match.updatedByProfile?.display_name,
+    match.updated_by_profile?.name,
+    match.updated_by_profile?.display_name,
+    updatedBy === createdBy ? createdByName : ""
+  ));
+
+  return {
+    createdBy,
+    createdByName,
+    createdAt: firstPresent(match.createdAt, match.created_at, match.dateTime, match.date),
+    updatedBy,
+    updatedByName,
+    updatedAt: firstPresent(match.updatedAt, match.updated_at, match.editedAt, match.edited_at)
+  };
+}
+
+export function getMatchMetadata(match = {}) {
+  const metadata = normalizeMatchMetadata(match);
+  return {
+    ...metadata,
+    createdByLabel: resolvedUserName(metadata.createdBy, metadata.createdByName) || "Unknown",
+    updatedByLabel: resolvedUserName(metadata.updatedBy, metadata.updatedByName) || "Unknown"
+  };
+}
+
 export function getCurrentUser() {
   if (!state.data.authProfileId) return null;
   return getUserById(state.data.currentUserId);
@@ -548,7 +624,7 @@ export function normalizeActivityLogEntry(entry) {
 
 export function normalizeStoredMatch(match) {
   const now = new Date().toISOString();
-  const fallbackUserId = match.createdBy || "";
+  const metadata = normalizeMatchMetadata(match);
   match.dateTime = match.dateTime || match.date || new Date().toISOString();
   match.startTime = match.startTime || match.dateTime;
   match.endTime = match.endTime || match.dateTime;
@@ -584,12 +660,12 @@ export function normalizeStoredMatch(match) {
   match.scorersB = normalizeScorerEntries(match.scorersB || match.result?.scorersB || []);
 
   match.status = match.result ? "completed" : match.status || "upcoming";
-  match.createdBy = match.createdBy || fallbackUserId;
-  match.createdByName = match.createdByName || getUserName(match.createdBy);
-  match.createdAt = match.createdAt || match.dateTime || now;
-  match.updatedBy = match.updatedBy || match.createdBy;
-  match.updatedByName = match.updatedByName || getUserName(match.updatedBy);
-  match.updatedAt = match.updatedAt || match.createdAt || now;
+  match.createdBy = metadata.createdBy;
+  match.createdByName = metadata.createdByName;
+  match.createdAt = metadata.createdAt || match.dateTime || now;
+  match.updatedBy = metadata.updatedBy || match.createdBy;
+  match.updatedByName = metadata.updatedByName || (match.updatedBy === match.createdBy ? match.createdByName : "");
+  match.updatedAt = metadata.updatedAt || match.createdAt || now;
   match.editHistory = Array.isArray(match.editHistory)
     ? match.editHistory.map(normalizeMatchEditHistoryEntry).filter(Boolean)
     : [];
@@ -693,6 +769,7 @@ export function restoreLatestRelevantMatch() {
 
 export function restoreUpcomingMatch(match) {
   const result = getMatchResult(match);
+  const metadata = normalizeMatchMetadata(match);
   setTeams({
     id: match.id,
     status: match.status || "upcoming",
@@ -717,12 +794,12 @@ export function restoreUpcomingMatch(match) {
     scorersB: normalizeScorerEntries(result?.scorersB || match.scorersB || []),
     liveMotmId: result?.manOfTheMatch || match.liveMotmId || "",
     lastGoal: match.lastGoal || null,
-    createdBy: match.createdBy || "",
-    createdByName: match.createdByName || "",
-    createdAt: match.createdAt || "",
-    updatedBy: match.updatedBy || "",
-    updatedByName: match.updatedByName || "",
-    updatedAt: match.updatedAt || "",
+    createdBy: metadata.createdBy,
+    createdByName: metadata.createdByName,
+    createdAt: metadata.createdAt || "",
+    updatedBy: metadata.updatedBy,
+    updatedByName: metadata.updatedByName,
+    updatedAt: metadata.updatedAt || "",
     editHistory: Array.isArray(match.editHistory) ? [...match.editHistory] : []
   });
   setSelectedPlayerIds([...state.currentTeams.teamA, ...state.currentTeams.teamB].map((player) => player.id));
@@ -797,6 +874,7 @@ export function getMatchStatus(match, now = Date.now()) {
 
 export function serializeCurrentMatch(overrides = {}) {
   if (!state.currentTeams) return null;
+  const metadata = normalizeMatchMetadata(state.currentTeams);
   const startTime = state.currentTeams.startTime ||
     (state.currentTeams.matchTime ? new Date(state.currentTeams.matchTime).toISOString() : new Date().toISOString());
   const endTime = state.currentTeams.endTime || startTime;
@@ -833,12 +911,12 @@ export function serializeCurrentMatch(overrides = {}) {
     scorersB: normalizeScorerEntries(state.currentTeams.scorersB).filter((entry) => entry.playerId === OWN_GOAL_ID || persistedPlayerIds.has(entry.playerId)),
     liveMotmId: persistedPlayerIds.has(state.currentTeams.liveMotmId) ? state.currentTeams.liveMotmId : "",
     lastGoal: persistedPlayerIds.has(state.currentTeams.lastGoal?.playerId) ? state.currentTeams.lastGoal : null,
-    createdBy: state.currentTeams.createdBy || "",
-    createdByName: state.currentTeams.createdByName || "",
-    createdAt: state.currentTeams.createdAt || "",
-    updatedBy: state.currentTeams.updatedBy || "",
-    updatedByName: state.currentTeams.updatedByName || "",
-    updatedAt: state.currentTeams.updatedAt || "",
+    createdBy: metadata.createdBy,
+    createdByName: metadata.createdByName,
+    createdAt: metadata.createdAt || "",
+    updatedBy: metadata.updatedBy,
+    updatedByName: metadata.updatedByName,
+    updatedAt: metadata.updatedAt || "",
     editHistory: Array.isArray(state.currentTeams.editHistory) ? [...state.currentTeams.editHistory] : []
   };
   return { ...match, ...overrides };
@@ -853,11 +931,13 @@ export function persistCurrentMatch(overrides = {}) {
   const user = getCurrentUser();
   if (!user) return;
   const now = new Date().toISOString();
+  const existingMetadata = normalizeMatchMetadata(existingMatch || {});
+  const baseMetadata = normalizeMatchMetadata(baseMatch);
   const match = {
     ...baseMatch,
-    createdBy: existingMatch?.createdBy || baseMatch.createdBy || user.id,
-    createdByName: existingMatch?.createdByName || baseMatch.createdByName || user.name,
-    createdAt: existingMatch?.createdAt || baseMatch.createdAt || now,
+    createdBy: existingMetadata.createdBy || baseMetadata.createdBy || user.id,
+    createdByName: existingMetadata.createdByName || baseMetadata.createdByName || user.name,
+    createdAt: existingMetadata.createdAt || baseMetadata.createdAt || now,
     updatedBy: user.id,
     updatedByName: user.name,
     updatedAt: now,

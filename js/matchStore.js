@@ -1,6 +1,6 @@
 import { authState } from "./auth.js";
 import { supabase } from "./supabaseClient.js";
-import { normalizePlayerRecord, setMatches, state, updateTeams } from "./state.js";
+import { normalizeMatchMetadata, normalizePlayerRecord, setMatches, state, updateTeams } from "./state.js";
 
 const MATCHES_TABLE = "matches";
 const MATCH_PLAYERS_TABLE = "match_players";
@@ -31,7 +31,12 @@ export async function loadSharedMatchesIntoState() {
   }
 
   const playersByMatch = groupRowsByMatch(playerRowsResult.rows || []);
-  const matches = (matchRows || []).map((matchRow) => remoteMatchToLocal(matchRow, playersByMatch.get(matchRow.id) || []));
+  const profilesById = await loadMatchAuditProfiles(matchRows || []);
+  const matches = (matchRows || []).map((matchRow) => remoteMatchToLocal(
+    matchRow,
+    playersByMatch.get(matchRow.id) || [],
+    profilesById
+  ));
   setMatches(matches);
   return { ok: true, matches: state.data.matches };
 }
@@ -41,12 +46,7 @@ export async function saveSharedMatch(localMatch) {
     return { ok: false, message: "Sign in before saving matches." };
   }
 
-  const matchRow = localMatchToRemoteMatch(localMatch);
-  const query = isUuid(localMatch.id)
-    ? supabase.from(MATCHES_TABLE).upsert({ ...matchRow, id: localMatch.id }).select("*").single()
-    : supabase.from(MATCHES_TABLE).insert(matchRow).select("*").single();
-
-  const { data: savedMatch, error: matchError } = await query;
+  const { data: savedMatch, error: matchError } = await saveMatchRow(localMatch, true);
   if (matchError) {
     console.warn("Could not save shared match to Supabase.", matchError);
     return { ok: false, message: matchError.message };
@@ -81,6 +81,20 @@ export async function saveSharedMatch(localMatch) {
   }
 
   return { ok: true, match: savedMatch };
+}
+
+async function saveMatchRow(localMatch, includeEditor) {
+  const matchRow = localMatchToRemoteMatch(localMatch, { includeEditor });
+  const query = isUuid(localMatch.id)
+    ? supabase.from(MATCHES_TABLE).upsert({ ...matchRow, id: localMatch.id }).select("*").single()
+    : supabase.from(MATCHES_TABLE).insert(matchRow).select("*").single();
+  const result = await query;
+
+  if (includeEditor && result.error && isMissingEditorColumnError(result.error)) {
+    return saveMatchRow(localMatch, false);
+  }
+
+  return result;
 }
 
 export async function syncMatchToSupabase(localMatch) {
@@ -139,17 +153,58 @@ async function loadMatchPlayerRows(matchIds) {
     : { ok: true, rows: flatResult.data || [] };
 }
 
-function localMatchToRemoteMatch(match) {
+async function loadMatchAuditProfiles(matchRows) {
+  const profileIds = [...new Set((matchRows || []).flatMap((match) => [
+    match.created_by,
+    match.createdBy,
+    match.updated_by,
+    match.updatedBy,
+    match.edited_by,
+    match.editedBy
+  ]).filter(Boolean))];
+
+  if (!profileIds.length) return new Map();
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, name, display_name")
+    .in("id", profileIds);
+
+  if (error && isMissingProfileDisplayNameError(error)) {
+    const fallbackResult = await supabase
+      .from("profiles")
+      .select("id, name")
+      .in("id", profileIds);
+
+    if (!fallbackResult.error) {
+      return new Map((fallbackResult.data || []).map((profile) => [profile.id, profile]));
+    }
+  }
+
+  if (error) {
+    console.warn("Could not load match audit profiles from Supabase.", error);
+    return new Map();
+  }
+
+  return new Map((data || []).map((profile) => [profile.id, profile]));
+}
+
+function localMatchToRemoteMatch(match, options = {}) {
   const now = new Date().toISOString();
-  return {
+  const metadata = normalizeMatchMetadata(match);
+  const row = {
     title: match.title || `${match.teamAName || "Team A"} vs ${match.teamBName || "Team B"}`,
     match_date: match.startTime || match.dateTime || now,
     location: match.location || "",
     status: match.status || "upcoming",
-    created_by: match.createdBy || authState.currentProfile.id,
-    created_at: match.createdAt || now,
+    created_by: metadata.createdBy || authState.currentProfile.id,
+    created_at: metadata.createdAt || now,
     updated_at: now
   };
+  if (options.includeEditor !== false) {
+    row.updated_by = authState.currentProfile.id;
+  }
+  return row;
 }
 
 function localMatchPlayersToRemoteRows(match, matchId) {
@@ -177,10 +232,21 @@ function appendTeamRows(rows, players, matchId, team) {
   });
 }
 
-function remoteMatchToLocal(matchRow, playerRows) {
+function remoteMatchToLocal(matchRow, playerRows, profilesById = new Map()) {
   const { teamAName, teamBName } = splitMatchTitle(matchRow.title);
   const teamAPlayers = playerRows.filter((row) => String(row.team || "").toUpperCase() === "A").map(remoteMatchPlayerToLocal);
   const teamBPlayers = playerRows.filter((row) => String(row.team || "").toUpperCase() === "B").map(remoteMatchPlayerToLocal);
+  const createdBy = matchRow.created_by || matchRow.createdBy || "";
+  const updatedBy = matchRow.updated_by || matchRow.updatedBy || matchRow.edited_by || matchRow.editedBy || createdBy;
+  const createdByProfile = profilesById.get(createdBy);
+  const updatedByProfile = profilesById.get(updatedBy);
+  const metadata = normalizeMatchMetadata({
+    ...matchRow,
+    createdBy,
+    createdByName: matchRow.created_by_name || getProfileName(createdByProfile),
+    updatedBy,
+    updatedByName: matchRow.updated_by_name || matchRow.edited_by_name || getProfileName(updatedByProfile)
+  });
 
   return {
     id: matchRow.id,
@@ -199,14 +265,18 @@ function remoteMatchToLocal(matchRow, playerRows) {
     teamBPlayers,
     teamA: teamAPlayers,
     teamB: teamBPlayers,
-    createdBy: matchRow.created_by || "",
-    createdByName: "",
+    createdBy: metadata.createdBy,
+    createdByName: metadata.createdByName,
     createdAt: matchRow.created_at || matchRow.match_date || new Date().toISOString(),
-    updatedBy: matchRow.created_by || "",
-    updatedByName: "",
+    updatedBy: metadata.updatedBy,
+    updatedByName: metadata.updatedByName,
     updatedAt: matchRow.updated_at || matchRow.created_at || new Date().toISOString(),
     editHistory: []
   };
+}
+
+function getProfileName(profile) {
+  return profile?.display_name || profile?.name || "";
 }
 
 function remoteMatchPlayerToLocal(row) {
@@ -257,4 +327,14 @@ function replaceLocalMatchId(oldId, newId) {
 
 function isUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
+}
+
+function isMissingEditorColumnError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return message.includes("updated_by") && (message.includes("schema cache") || message.includes("column"));
+}
+
+function isMissingProfileDisplayNameError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return message.includes("display_name") && (message.includes("schema cache") || message.includes("column"));
 }
