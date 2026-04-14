@@ -1448,12 +1448,17 @@ export function createMatchAndReturnHome() {
     els.teamBalanceNote.textContent = "Teams must have equal number of players";
     return;
   }
-  persistCurrentMatch({
+  const savedMatch = persistCurrentMatch({
     forceSave: true,
     status: "upcoming",
     auditAction: "match_created",
     logAction: "match_created"
   });
+  if (!savedMatch) {
+    console.error("Match creation did not produce a saved local match.", { currentTeams: state.currentTeams });
+    els.teamBalanceNote.textContent = "Could not create match. Please try again.";
+    return;
+  }
   homeFeedbackMessage = "Match Created Successfully";
   resetMatchSetupState();
   switchTab("home");

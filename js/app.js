@@ -3,7 +3,7 @@ import { bindEvents } from "./events.js";
 import { loadSharedMatchesIntoState, syncMatchToSupabase } from "./matchStore.js";
 import { loadSharedPlayersIntoState } from "./playerStore.js";
 import { initState } from "./state.js";
-import { initUI } from "./ui.js";
+import { initUI, render } from "./ui.js";
 
 export async function init() {
   try {
@@ -11,8 +11,11 @@ export async function init() {
     await initAuth();
     if (authState.isAuthenticated) await loadSharedPlayersIntoState();
     if (authState.isAuthenticated) await loadSharedMatchesIntoState();
-    window.addEventListener("match:local-persisted", (event) => {
-      syncMatchToSupabase(event.detail?.match);
+    window.addEventListener("match:local-persisted", async (event) => {
+      const result = await syncMatchToSupabase(event.detail?.match);
+      if (!result.ok) return;
+      await loadSharedMatchesIntoState();
+      render();
     });
     initUI();
     bindEvents();
