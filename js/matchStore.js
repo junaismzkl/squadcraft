@@ -205,10 +205,12 @@ async function loadMatchAuditProfiles(matchRows) {
 function localMatchToRemoteMatch(match) {
   const now = new Date().toISOString();
   const metadata = normalizeMatchMetadata(match);
+  const startTime = match.startTime || match.dateTime || now;
+  const endTime = match.endTime || startTime;
   return {
     title: match.title || `${match.teamAName || "Team A"} vs ${match.teamBName || "Team B"}`,
-    match_date: match.startTime || match.dateTime || now,
-    location: match.location || "",
+    match_date: startTime,
+    location: encodeMatchLocation(match.location || "", { endTime }),
     status: match.status || "upcoming",
     created_by: metadata.createdBy || authState.currentProfile.id,
     created_at: metadata.createdAt || now
@@ -238,6 +240,9 @@ function appendTeamRows(rows, players, matchId, team) {
 
 function remoteMatchToLocal(matchRow, playerRows, profilesById = new Map()) {
   const { teamAName, teamBName } = splitMatchTitle(matchRow.title);
+  const locationData = decodeMatchLocation(matchRow.location);
+  const startTime = matchRow.match_date || matchRow.created_at || new Date().toISOString();
+  const endTime = locationData.endTime || matchRow.end_time || matchRow.endTime || addMinutesToDateTime(startTime, 60);
   const teamAPlayers = playerRows.filter((row) => String(row.team || "").toUpperCase() === "A").map(remoteMatchPlayerToLocal);
   const teamBPlayers = playerRows.filter((row) => String(row.team || "").toUpperCase() === "B").map(remoteMatchPlayerToLocal);
   const createdBy = matchRow.created_by || matchRow.createdBy || "";
@@ -255,10 +260,10 @@ function remoteMatchToLocal(matchRow, playerRows, profilesById = new Map()) {
   return {
     id: matchRow.id,
     title: matchRow.title || "",
-    dateTime: matchRow.match_date || matchRow.created_at || new Date().toISOString(),
-    startTime: matchRow.match_date || matchRow.created_at || new Date().toISOString(),
-    endTime: addMinutesToDateTime(matchRow.match_date || matchRow.created_at, 60),
-    location: matchRow.location || "",
+    dateTime: startTime,
+    startTime,
+    endTime,
+    location: locationData.location,
     status: matchRow.status || "upcoming",
     teamAName,
     teamBName,
@@ -287,6 +292,34 @@ function addMinutesToDateTime(value, minutes) {
   const date = new Date(value || "");
   if (Number.isNaN(date.getTime())) return value || new Date().toISOString();
   return new Date(date.getTime() + minutes * 60000).toISOString();
+}
+
+function encodeMatchLocation(location, timing = {}) {
+  return JSON.stringify({
+    squadcraft: 1,
+    location,
+    endTime: timing.endTime || ""
+  });
+}
+
+function decodeMatchLocation(value) {
+  const rawValue = String(value || "");
+  try {
+    const parsed = JSON.parse(rawValue);
+    if (parsed?.squadcraft === 1) {
+      return {
+        location: parsed.location || "",
+        endTime: parsed.endTime || ""
+      };
+    }
+  } catch {
+    // Older rows stored plain location text here.
+  }
+
+  return {
+    location: rawValue,
+    endTime: ""
+  };
 }
 
 function remoteMatchPlayerToLocal(row) {

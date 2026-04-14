@@ -856,6 +856,33 @@ export function matchEndTimeValue(match) {
   return Number.isNaN(time) ? Number.MAX_SAFE_INTEGER : time;
 }
 
+export function getMatchTimingState(match, now = Date.now()) {
+  const start = matchStartTimeValue(match);
+  const end = matchEndTimeValue(match);
+  const current = matchNowTimeValue(now);
+
+  if (start === Number.MAX_SAFE_INTEGER || end === Number.MAX_SAFE_INTEGER) {
+    return "upcoming";
+  }
+
+  if (current < start) return "upcoming";
+  if (current >= end) return "past";
+  return "live";
+}
+
+export function matchNowTimeValue(now = Date.now()) {
+  const date = new Date(now);
+  return Date.UTC(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    date.getHours(),
+    date.getMinutes(),
+    date.getSeconds(),
+    date.getMilliseconds()
+  );
+}
+
 export function isUpcomingMatch(match, now = Date.now()) {
   return getMatchStatus(match, now) === "upcoming";
 }
@@ -877,20 +904,10 @@ export function getMatchStatus(match, now = Date.now()) {
     return "completed";
   }
 
-  if (match.status === "pending_result") {
-    return "pending_result";
-  }
+  const timingState = getMatchTimingState(match, now);
 
-  const start = matchStartTimeValue(match);
-  const end = matchEndTimeValue(match);
-
-  if (start === Number.MAX_SAFE_INTEGER || end === Number.MAX_SAFE_INTEGER) {
-    return match.status || "upcoming";
-  }
-
-  if (now < start) return "upcoming";
-  if (now > end) return "pending_result";
-  return "live";
+  if (timingState === "past" || match.status === "pending_result") return "pending_result";
+  return timingState;
 }
 
 export function serializeCurrentMatch(overrides = {}) {

@@ -1,6 +1,6 @@
 import { els } from "./dom.js";
 import { addLiveGoal, completeLiveMatch, setLiveMotm } from "./result.js";
-import { countScorers, getCurrentMatchPlayers, matchStartTime, OWN_GOAL_ID, scorerGoalTotal } from "./state.js";
+import { countScorers, getCurrentMatchPlayers, matchNowTimeValue, matchStartTime, OWN_GOAL_ID, scorerGoalTotal } from "./state.js";
 import { escapeHtml } from "./utils.js";
 
 let liveTimerId = null;
@@ -165,7 +165,7 @@ function bindLiveTimer(node, startTime) {
 function formatElapsedTime(startTime) {
   const start = new Date(startTime).getTime();
   if (Number.isNaN(start)) return "--'";
-  const minutes = Math.max(0, Math.floor((Date.now() - start) / 60000));
+  const minutes = Math.max(0, Math.floor((matchNowTimeValue() - start) / 60000));
   return `${minutes}'`;
 }
 

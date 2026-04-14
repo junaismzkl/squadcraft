@@ -2571,7 +2571,7 @@ function formatMatchWindow(match) {
 function getHomeUpcomingMatches() {
   const now = Date.now();
   return state.data.matches
-      .filter((match) => matchStartTimeValue(match) > now && getMatchStatus(match, now) === "upcoming")
+      .filter((match) => getMatchStatus(match, now) === "upcoming")
       .sort((a, b) => matchStartTimeValue(a) - matchStartTimeValue(b));
 }
 
