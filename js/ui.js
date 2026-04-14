@@ -103,8 +103,14 @@ let editingMatchSnapshot = null;
 let hasPendingMatchEdits = false;
 let notificationsOpen = false;
 const imageDrafts = {
+  profile: "",
   player: "",
   guest: ""
+};
+const imageRemoved = {
+  profile: false,
+  player: false,
+  guest: false
 };
 const imagePreviewState = {
   target: "",
@@ -294,7 +300,7 @@ export async function savePlayerFromForm(event) {
   const editingId = els.editingPlayerId.value;
   if (!name) return;
   const existingPlayer = state.data.players.find((item) => item.id === editingId);
-  const image = imageDrafts.player || existingPlayer?.image || "";
+  const image = imageRemoved.player ? "" : imageDrafts.player || existingPlayer?.image || "";
   if (existingPlayer?.profileBacked) {
     if (!canEditProfileBackedPlayer(existingPlayer)) {
       alert("You do not have permission to edit this profile player.");
@@ -374,6 +380,8 @@ export function resetPlayerForm() {
   if (els.playerJerseyNumber) els.playerJerseyNumber.value = "";
   els.playerImage.value = "";
   imageDrafts.player = "";
+  imageRemoved.player = false;
+  updateImageUploadPreview("player", "");
   els.playerGuest.checked = false;
   els.playerGuest.closest("label")?.classList.remove("hidden");
   isPlayerFormVisible = false;
@@ -402,6 +410,9 @@ export function editPlayer(id) {
   if (els.playerDominantFoot) els.playerDominantFoot.value = player.dominantFoot || "";
   if (els.playerJerseyNumber) els.playerJerseyNumber.value = player.jerseyNumber || "";
   els.playerImage.value = "";
+  imageDrafts.player = "";
+  imageRemoved.player = false;
+  updateImageUploadPreview("player", player.image || "");
   els.playerGuest.checked = false;
   els.playerGuest.closest("label")?.classList.toggle("hidden", Boolean(player.profileBacked));
   els.playerForm.querySelector(".primary").textContent = player.profileBacked ? "Save Profile Player" : "Save Player";
@@ -579,18 +590,25 @@ export async function addQuickGuest(event) {
   els.guestName.value = "";
   els.guestRating.value = "50";
     els.guestRole.value = "CM";
-    els.guestPosition.value = "";
-    els.guestPositionThird.value = "";
+  els.guestPosition.value = "";
+  els.guestPositionThird.value = "";
   els.guestImage.value = "";
   imageDrafts.guest = "";
+  imageRemoved.guest = false;
+  updateImageUploadPreview("guest", "");
   renderMatchSection();
   closeGuestForm();
 }
 
 export async function handleImageUploadChange(target) {
-  const input = target === "guest" ? els.guestImage : els.playerImage;
+  const input = getImageInput(target);
   const file = input?.files?.[0];
   if (!file) return;
+  if (!file.type.startsWith("image/")) {
+    alert("Choose an image file.");
+    input.value = "";
+    return;
+  }
 
   const dataUrl = await readFileAsDataUrl(file);
   const resizedImage = await resizeImageDataUrl(dataUrl);
@@ -604,7 +622,7 @@ export async function handleImageUploadChange(target) {
 }
 
 export function handleImagePreviewCancel() {
-  const input = imagePreviewState.target === "guest" ? els.guestImage : els.playerImage;
+  const input = getImageInput(imagePreviewState.target);
   if (input) input.value = "";
   resetImagePreviewState();
 }
@@ -616,6 +634,8 @@ export function handleImagePreviewSave() {
   }
 
   imageDrafts[imagePreviewState.target] = exportPreviewImage();
+  imageRemoved[imagePreviewState.target] = false;
+  updateImageUploadPreview(imagePreviewState.target);
   resetImagePreviewState(false);
 }
 
@@ -641,7 +661,6 @@ export function handleImagePreviewReupload(event) {
 
 export function handleImagePreviewZoom() {
   imagePreviewState.zoom = Number(els.imagePreviewZoom.value) || 1;
-  console.log("Image preview zoom:", imagePreviewState.zoom);
   clampImagePreviewOffset();
   applyImagePreviewTransform();
 }
@@ -744,7 +763,6 @@ function applyImagePreviewTransform() {
   els.imagePreviewPhoto.style.width = `${width}px`;
   els.imagePreviewPhoto.style.height = `${height}px`;
   els.imagePreviewPhoto.style.transform = transform;
-  console.log("Image preview transform:", transform);
 }
 
 function clampImagePreviewOffset() {
@@ -770,17 +788,13 @@ function exportPreviewImage() {
   const drawX = (outputSize - drawWidth) / 2 + imagePreviewState.offsetX * scaleX;
   const drawY = (outputSize - drawHeight) / 2 + imagePreviewState.offsetY * scaleX;
 
-  context.beginPath();
-  context.arc(outputSize / 2, outputSize / 2, outputSize / 2, 0, Math.PI * 2);
-  context.closePath();
-  context.clip();
   context.drawImage(els.imagePreviewPhoto, drawX, drawY, drawWidth, drawHeight);
   return canvas.toDataURL("image/jpeg", 0.88);
 }
 
 function resetImagePreviewState(clearInput = true) {
   if (clearInput) {
-    const input = imagePreviewState.target === "guest" ? els.guestImage : els.playerImage;
+    const input = getImageInput(imagePreviewState.target);
     if (input) input.value = "";
   }
   if (imagePreviewState.dragPointerId !== null) {
@@ -811,6 +825,65 @@ function resetImagePreviewState(clearInput = true) {
 
 function getImagePreviewFrameSize() {
   return els.imagePreviewFrame.clientWidth || 220;
+}
+
+export function triggerImageUpload(target) {
+  getImageInput(target)?.click();
+}
+
+export function removeImageUpload(target) {
+  const input = getImageInput(target);
+  if (input) input.value = "";
+  imageDrafts[target] = "";
+  imageRemoved[target] = true;
+  updateImageUploadPreview(target, "");
+}
+
+export function setImageUploadValue(target, image = "") {
+  const input = getImageInput(target);
+  if (input) input.value = "";
+  imageDrafts[target] = "";
+  imageRemoved[target] = false;
+  updateImageUploadPreview(target, image);
+}
+
+export function getImageUploadDraft(target) {
+  return imageDrafts[target] || "";
+}
+
+export function isImageUploadRemoved(target) {
+  return Boolean(imageRemoved[target]);
+}
+
+export function updateImageUploadPreview(target, currentImage = "") {
+  const preview = getImagePreview(target);
+  if (!preview) return;
+  const image = imageRemoved[target] ? "" : imageDrafts[target] || currentImage || "";
+  preview.src = image || DEFAULT_AVATAR;
+  preview.classList.toggle("is-empty", !image);
+  if (target === "profile" && els.authProfileAvatarPreview && image) {
+    els.authProfileAvatarPreview.src = image;
+  }
+  const removeButton = getImageRemoveButton(target);
+  if (removeButton) removeButton.disabled = !image;
+}
+
+function getImageInput(target) {
+  if (target === "profile") return els.authProfileAvatar;
+  if (target === "guest") return els.guestImage;
+  return els.playerImage;
+}
+
+function getImagePreview(target) {
+  if (target === "profile") return els.authProfileAvatarUploadPreview;
+  if (target === "guest") return els.guestImagePreview;
+  return els.playerImagePreview;
+}
+
+function getImageRemoveButton(target) {
+  if (target === "profile") return els.authProfileAvatarRemove;
+  if (target === "guest") return els.guestImageRemove;
+  return els.playerImageRemove;
 }
 
 function loadImageDimensions(dataUrl) {

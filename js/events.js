@@ -4,7 +4,6 @@ import { loadSharedMatchesIntoState } from "./matchStore.js";
 import { generateTeams, getMatchSettings, toggleSelectAllPlayers } from "./match.js";
 import { loadSharedPlayersIntoState } from "./playerStore.js";
 import { addScorerRow, openResultPanel, saveMatchResult, updateScoreFromScorers } from "./result.js";
-import { readFileAsDataUrl, resizeImageDataUrl } from "./utils.js";
 import {
   addQuickGuest,
   cancelMatchCreation,
@@ -13,25 +12,28 @@ import {
   goToMatchLandingStep,
   goToMatchTimeStep,
   goToPlayerSelectionStep,
+  getImageUploadDraft,
   handleImageUploadChange,
   handleMatchScheduleChange,
+  isImageUploadRemoved,
   clearManualSwapSelection,
   closeNotificationsPanel,
   openUserManagement,
+  removeImageUpload,
   render,
   renderHistory,
   renderMatchSection,
   resetPlayerForm,
   savePlayerFromForm,
+  setImageUploadValue,
   setActiveStatsTab,
   showPlayerForm,
   startMatchCreation,
   switchTab,
+  triggerImageUpload,
   toggleNotificationsPanel,
   toggleGuestForm
 } from "./ui.js";
-
-let profileAvatarDraft = "";
 
 export function bindEvents() {
   window.addEventListener("auth:changed", handleAuthChanged);
@@ -49,13 +51,25 @@ export function bindEvents() {
   els.authCreateForm?.addEventListener("submit", handleCreateAccount);
   els.authProfileForm?.addEventListener("submit", handleProfileSave);
   els.authProfileAvatar?.addEventListener("change", handleProfileAvatarChange);
+  els.authProfileAvatarChange?.addEventListener("click", () => triggerImageUpload("profile"));
+  els.authProfileAvatarRemove?.addEventListener("click", () => {
+    removeImageUpload("profile");
+    if (els.authProfileAvatarPreview) els.authProfileAvatarPreview.src = createProfilePlaceholder(els.authProfileName?.value || authState.currentAuthUser?.email || "User");
+    setProfileMessage("Profile image will be removed when you save.");
+  });
   els.authLogout?.addEventListener("click", handleAuthLogout);
   els.showPlayerForm.addEventListener("click", showPlayerForm);
   els.playerForm.addEventListener("submit", savePlayerFromForm);
   els.cancelEditPlayer.addEventListener("click", resetPlayerForm);
   els.quickGuestForm.addEventListener("submit", addQuickGuest);
   els.playerImage.addEventListener("change", () => handleImageUploadChange("player"));
+  els.playerImageChange?.addEventListener("click", () => triggerImageUpload("player"));
+  els.playerImageRemove?.addEventListener("click", () => removeImageUpload("player"));
   els.guestImage.addEventListener("change", () => handleImageUploadChange("guest"));
+  els.guestImageChange?.addEventListener("click", () => triggerImageUpload("guest"));
+  els.guestImageRemove?.addEventListener("click", () => removeImageUpload("guest"));
+  setImageUploadValue("player", "");
+  setImageUploadValue("guest", "");
   els.guestToggle.addEventListener("click", toggleGuestForm);
   els.createNewMatch.addEventListener("click", startMatchCreation);
   els.matchBackToLanding.addEventListener("click", goToMatchLandingStep);
@@ -243,8 +257,12 @@ async function handleProfileSave(event) {
     dominantFoot: els.authProfileDominantFoot?.value || "",
     jerseyNumber: els.authProfileJerseyNumber?.value || ""
   };
-  const avatarUrl = profileAvatarDraft || authState.currentProfile?.avatar_url || "";
-  if (avatarUrl) profilePayload.avatarUrl = avatarUrl;
+  const profileAvatarDraft = getImageUploadDraft("profile");
+  if (isImageUploadRemoved("profile")) {
+    profilePayload.avatarUrl = "";
+  } else if (profileAvatarDraft) {
+    profilePayload.avatarUrl = profileAvatarDraft;
+  }
   const result = await saveCurrentProfile(profilePayload);
   els.authProfileSave.disabled = false;
 
@@ -253,7 +271,6 @@ async function handleProfileSave(event) {
     setProfileMessage(result.message || "Could not save profile.", true);
     return;
   }
-  profileAvatarDraft = result.profile?.avatar_url || profileAvatarDraft;
   await loadSharedPlayersIntoState();
   render();
   populateProfileForm();
@@ -261,38 +278,16 @@ async function handleProfileSave(event) {
 }
 
 async function handleProfileAvatarChange(event) {
-  const file = event.target.files?.[0];
-  if (!file) return;
-  if (!file.type.startsWith("image/")) {
-    setProfileMessage("Choose an image file.", true);
-    event.target.value = "";
-    return;
-  }
-  if (file.size > 3 * 1024 * 1024) {
-    setProfileMessage("Choose an image under 3 MB.", true);
-    event.target.value = "";
-    return;
-  }
-
-  const dataUrl = await readFileAsDataUrl(file);
-  const resized = dataUrl ? await resizeImageDataUrl(dataUrl) : "";
-  if (!resized) {
-    setProfileMessage("That image could not be read. Please try another photo.", true);
-    event.target.value = "";
-    return;
-  }
-
-  profileAvatarDraft = resized;
-  if (els.authProfileAvatarPreview) {
-    els.authProfileAvatarPreview.src = resized;
-  }
-  setProfileMessage("Profile image ready to save.");
+  await handleImageUploadChange("profile");
+  const draft = getImageUploadDraft("profile");
+  if (draft && els.authProfileAvatarPreview) els.authProfileAvatarPreview.src = draft;
+  if (draft) setProfileMessage("Profile image ready to save.");
 }
 
 function populateProfileForm() {
   const profile = authState.currentProfile || {};
   const email = authState.currentAuthUser?.email || "";
-  profileAvatarDraft = profile.avatar_url || "";
+  const avatar = profile.avatar_url || "";
 
   if (els.authProfileName) els.authProfileName.value = profile.name || "";
   if (els.authProfileDisplayName) els.authProfileDisplayName.value = profile.display_name || profile.name || "";
@@ -305,8 +300,9 @@ function populateProfileForm() {
   if (els.authProfileRole) els.authProfileRole.textContent = formatRoleLabel(profile.role || "user");
   if (els.authProfileAvatar) els.authProfileAvatar.value = "";
   if (els.authProfileAvatarPreview) {
-    els.authProfileAvatarPreview.src = profileAvatarDraft || createProfilePlaceholder(profile.name || email || "User");
+    els.authProfileAvatarPreview.src = avatar || createProfilePlaceholder(profile.name || email || "User");
   }
+  setImageUploadValue("profile", avatar);
   setProfileMessage("Role is controlled by admins. Add a display name and primary position to complete your player profile.");
 }
 

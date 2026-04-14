@@ -34,12 +34,15 @@ export function toggleSelectAllPlayers() {
   updateFormationOptions();
 }
 
-export function getMatchSettings(matchTime = "") {
+export function getMatchSettings(matchTime = "", playerCount = null) {
   const schedule = buildMatchSchedule(matchTime);
   if (!schedule.ok) {
     return schedule;
   }
-  const teamSize = Math.ceil((state.selectedPlayerIds.size + state.matchGuestPlayers.length) / 2);
+  const safePlayerCount = Number.isFinite(Number(playerCount))
+    ? Number(playerCount)
+    : getSelectedMatchPlayers().length;
+  const teamSize = Math.ceil(safePlayerCount / 2);
   return {
     ok: true,
     matchTime: schedule.startTime,
@@ -70,12 +73,11 @@ export function generateTeams(matchTime = "", reshuffle = false, options = {}) {
     if (!hasPermission("createMatch")) {
       return { ok: false, message: "You do not have permission to create matches." };
     }
-    const selectedPlayers = state.data.players.filter((player) => player.approvalStatus === "approved" && state.selectedPlayerIds.has(player.id));
-    const matchPlayers = [...selectedPlayers, ...state.matchGuestPlayers];
+    const matchPlayers = getSelectedMatchPlayers();
     const playerValidation = validateSelectedPlayersForMatch(matchPlayers);
     if (!playerValidation.ok) return playerValidation;
 
-    const settings = getMatchSettings(matchTime);
+    const settings = getMatchSettings(matchTime, matchPlayers.length);
     if (!settings.ok) {
       return settings;
     }
@@ -161,6 +163,13 @@ export function validateSelectedPlayersForMatch(selectedPlayers) {
   }
 
   return { ok: true };
+}
+
+function getSelectedMatchPlayers() {
+  const selectedPlayers = state.data.players.filter((player) =>
+    player.approvalStatus === "approved" && state.selectedPlayerIds.has(player.id)
+  );
+  return [...selectedPlayers, ...state.matchGuestPlayers];
 }
 
 function buildMatchSchedule(matchTime) {

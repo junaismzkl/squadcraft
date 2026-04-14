@@ -1,7 +1,7 @@
 {
   "appId": "com.squadcraft.app",
   "appName": "SquadCraft",
-  "webDir": ".",
+  "webDir": "www",
   "server": {
     "url": "https://squadcraft.pages.dev",
     "cleartext": false

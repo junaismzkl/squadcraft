@@ -116,7 +116,17 @@
             </select>
           </label>
           <label>Jersey Number <input id="auth-profile-jersey-number" type="number" min="0" max="99" inputmode="numeric"></label>
-          <label>Profile Image <input id="auth-profile-avatar" type="file" accept="image/*"></label>
+          <div class="image-upload-field" data-image-upload="profile">
+            <span class="image-upload-label">Profile Image</span>
+            <div class="image-upload-card">
+              <img class="image-upload-preview" id="auth-profile-avatar-upload-preview" alt="Profile image preview">
+              <div class="image-upload-actions">
+                <button class="secondary compact-button" id="auth-profile-avatar-change" type="button">Change/Upload</button>
+                <button class="ghost danger compact-button" id="auth-profile-avatar-remove" type="button">Remove</button>
+              </div>
+            </div>
+            <input id="auth-profile-avatar" type="file" accept="image/*" class="hidden">
+          </div>
           <p class="helper" id="auth-profile-message">Role is controlled by admins. Add a display name and primary position to complete your player profile.</p>
           <button class="primary" id="auth-profile-save" type="submit">Save Profile</button>
         </form>
@@ -206,7 +216,17 @@
               </select>
             </label>
             <label>Jersey Number <input id="player-jersey-number" type="text" maxlength="2" inputmode="numeric"></label>
-            <label>Photo <input id="player-image" type="file" accept="image/*"></label>
+            <div class="image-upload-field" data-image-upload="player">
+              <span class="image-upload-label">Photo</span>
+              <div class="image-upload-card">
+                <img class="image-upload-preview" id="player-image-preview" alt="Player photo preview">
+                <div class="image-upload-actions">
+                  <button class="secondary compact-button" id="player-image-change" type="button">Change/Upload</button>
+                  <button class="ghost danger compact-button" id="player-image-remove" type="button">Remove</button>
+                </div>
+              </div>
+              <input id="player-image" type="file" accept="image/*" class="hidden">
+            </div>
             <label class="checkbox-row"><input id="player-guest" type="checkbox"> Guest player</label>
           <div class="form-actions">
             <button class="primary" type="submit">Add Player</button>
@@ -322,7 +342,17 @@
                   <option>CF</option>
                 </select>
               </label>
-              <label>Photo <input id="guest-image" type="file" accept="image/*"></label>
+              <div class="image-upload-field" data-image-upload="guest">
+                <span class="image-upload-label">Photo</span>
+                <div class="image-upload-card">
+                  <img class="image-upload-preview" id="guest-image-preview" alt="Guest photo preview">
+                  <div class="image-upload-actions">
+                    <button class="secondary compact-button" id="guest-image-change" type="button">Change/Upload</button>
+                    <button class="ghost danger compact-button" id="guest-image-remove" type="button">Remove</button>
+                  </div>
+                </div>
+                <input id="guest-image" type="file" accept="image/*" class="hidden">
+              </div>
             <div class="form-actions"><button class="secondary" type="submit">Add Guest</button></div>
           </form>
 
@@ -457,7 +487,7 @@
     <div class="match-finished-modal-card image-preview-modal-card">
       <p class="eyebrow">Player Photo</p>
       <h3 id="image-preview-title">Preview Image</h3>
-      <p class="image-preview-copy">Check the circular preview before saving this photo.</p>
+      <p class="image-preview-copy">Drag to position, zoom if needed, then save the square crop.</p>
       <div class="image-preview-frame" id="image-preview-frame">
         <img id="image-preview-photo" alt="Selected player preview" draggable="false">
       </div>
