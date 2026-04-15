@@ -304,8 +304,19 @@ function localMatchToRemoteMatch(match) {
 
 function localMatchPlayersToRemoteRows(match, matchId) {
   const rows = [];
-  appendTeamRows(rows, getPersistedTeamPlayers(match, "A"), matchId, "A");
-  appendTeamRows(rows, getPersistedTeamPlayers(match, "B"), matchId, "B");
+  const metadata = normalizeMatchMetadata(match);
+  const auditFields = {
+    created_by: metadata.createdBy || authState.currentProfile?.id || null,
+    created_at: metadata.createdAt || new Date().toISOString()
+  };
+  appendTeamRows(rows, getPersistedTeamPlayers(match, "A"), matchId, "A", auditFields);
+  appendTeamRows(rows, getPersistedTeamPlayers(match, "B"), matchId, "B", auditFields);
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] match_players row audit payload sample`, {
+    matchId,
+    createdBy: auditFields.created_by,
+    createdAt: auditFields.created_at,
+    sample: rows[0] || null
+  });
   return rows;
 }
 
@@ -315,7 +326,7 @@ function getPersistedTeamPlayers(match, team) {
   return Array.isArray(primary) && primary.length ? primary : Array.isArray(fallback) ? fallback : [];
 }
 
-function appendTeamRows(rows, players, matchId, team) {
+function appendTeamRows(rows, players, matchId, team, auditFields = {}) {
   players.forEach((player) => {
     const isGuest = Boolean(player.isGuest);
     const profileId = isGuest ? null : (player.profileId || player.profile_id || player.ownerUserId || authState.currentProfile?.id || player.id || null);
@@ -324,7 +335,9 @@ function appendTeamRows(rows, players, matchId, team) {
       profile_id: profileId,
       guest_name: isGuest ? player.name || "Guest" : null,
       guest_position: isGuest ? getPlayerRoleLabel(player) : null,
-      team
+      team,
+      created_by: auditFields.created_by || authState.currentProfile?.id || null,
+      created_at: auditFields.created_at || new Date().toISOString()
     });
   });
 }
