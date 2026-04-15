@@ -76,6 +76,7 @@ import {
   removeNotification,
   removePlayer,
   removeSelectedPlayerId,
+  resetDerivedStats,
   restoreUpcomingMatch,
   roles,
   scorersText,
@@ -1369,6 +1370,7 @@ export function renderStats() {
     button.classList.toggle("active", isActive);
     button.setAttribute("aria-selected", isActive ? "true" : "false");
   });
+  renderStatsResetButton();
 
   if (!state.data.players.length) {
     els.leaderboard.appendChild(emptyState("No stats available yet", "Saved matches will build your leaderboard."));
@@ -1399,6 +1401,67 @@ export function renderStats() {
     .forEach(({ player, value }, index) => {
       els.leaderboard.appendChild(createStatsLeaderboardRow(player, value, index, config));
     });
+}
+
+function renderStatsResetButton() {
+  const existingButton = document.querySelector("#reset-stats-button");
+  existingButton?.remove();
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] stats reset visibility`, {
+    currentUserRole: authState.currentProfile?.role || "",
+    canResetStats: canManageRoles()
+  });
+  if (!canManageRoles() || !els.leaderboard?.parentElement) return;
+
+  const button = document.createElement("button");
+  button.id = "reset-stats-button";
+  button.type = "button";
+  button.className = "secondary compact-button";
+  button.textContent = "Reset Stats";
+  button.addEventListener("click", handleResetStats);
+  els.leaderboard.parentElement.insertBefore(button, els.leaderboard);
+}
+
+function handleResetStats() {
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] stats reset clicked`, {
+    currentUserRole: authState.currentProfile?.role || "",
+    playersAffected: state.data.players.length
+  });
+  if (!canManageRoles()) return;
+  const confirmed = confirm("Reset player stats? Match history, players, profiles, approvals, and notifications will stay unchanged.");
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] stats reset confirmation`, {
+    currentUserRole: authState.currentProfile?.role || "",
+    resetConfirmed: confirmed,
+    playersAffected: state.data.players.length,
+    before: summarizeVisibleStats()
+  });
+  if (!confirmed) return;
+  resetDerivedStats();
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] stats reset completed`, {
+    currentUserRole: authState.currentProfile?.role || "",
+    playersAffected: state.data.players.length,
+    after: summarizeVisibleStats()
+  });
+  render();
+}
+
+function summarizeVisibleStats() {
+  return state.data.players.reduce((summary, player) => {
+    const stats = getPlayerStats(player);
+    summary.players += 1;
+    summary.matches += Number(stats.matches) || 0;
+    summary.goals += Number(stats.goals) || 0;
+    summary.wins += Number(stats.wins) || 0;
+    summary.motm += Number(stats.motm) || 0;
+    summary.cleanSheets += Number(stats.cleanSheets) || 0;
+    return summary;
+  }, {
+    players: 0,
+    matches: 0,
+    goals: 0,
+    wins: 0,
+    motm: 0,
+    cleanSheets: 0
+  });
 }
 
 export function setActiveStatsTab(tab) {
@@ -1491,7 +1554,7 @@ export function createMatchAndReturnHome() {
     els.teamBalanceNote.textContent = "Could not create match. Please try again.";
     return;
   }
-  addMatchActionNotification(savedMatch, "match_created", "Match created");
+  addMatchActionNotification(savedMatch, "match_created");
   homeFeedbackMessage = "Match Created Successfully";
   resetMatchSetupState();
   switchTab("home");
@@ -2667,14 +2730,16 @@ export function renderNotifications() {
     return;
   }
 
+  els.notificationsList.appendChild(createClearNotificationsButton(notifications));
   notifications.forEach((notification) => {
+    const content = getNotificationDisplayContent(notification);
     const row = document.createElement("button");
     row.type = "button";
     row.className = `notification-row${notification.read ? "" : " unread"}`;
     row.innerHTML = `
       <div>
-        <strong>${escapeHtml(notification.message)}</strong>
-        <p>${formatNotificationTimestamp(notification.createdAt)}</p>
+        <strong>${escapeHtml(content.message)}</strong>
+        <p>${escapeHtml(content.detail)}</p>
       </div>
       <span class="pill">${escapeHtml(formatNotificationType(notification.type))}</span>
     `;
@@ -2691,6 +2756,19 @@ export function toggleNotificationsPanel() {
 export function closeNotificationsPanel() {
   notificationsOpen = false;
   renderNotifications();
+}
+
+function createClearNotificationsButton(notifications) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "secondary compact-button";
+  button.textContent = "Clear notifications";
+  button.addEventListener("click", () => {
+    notifications.forEach((notification) => removeNotification(notification.id));
+    persist();
+    renderNotifications();
+  });
+  return button;
 }
 
 function finishMatchEditing() {
@@ -2726,7 +2804,7 @@ function finishMatchEditing() {
     auditAction: "match_edited",
     logAction: "match_edited"
   });
-  addMatchActionNotification(state.currentTeams, "match_edited", "Match edited");
+  addMatchActionNotification(state.currentTeams, "match_edited");
   editingMatchSnapshot = cloneMatchSnapshot(serializeCurrentMatch());
   originalEditingMatchId = "";
   hasPendingMatchEdits = false;
@@ -2822,7 +2900,7 @@ function addPendingResultNotificationIfMissing(match) {
   });
 }
 
-function addMatchActionNotification(match, type, message) {
+function addMatchActionNotification(match, type) {
   if (!match?.id) return;
   const now = Date.now();
   const recentDuplicate = getNotifications().some((notification) =>
@@ -2835,11 +2913,49 @@ function addMatchActionNotification(match, type, message) {
     id: `${type}-${match.id}-${now}`,
     matchId: match.id,
     type,
-    message,
+    message: formatMatchActionMessage(match, type),
     read: false,
     createdAt: new Date(now).toISOString()
   });
   persist();
+}
+
+function getNotificationDisplayContent(notification) {
+  const match = state.data.matches.find((item) => item.id === notification.matchId);
+  const message = notification.type === "result_added" && match
+    ? formatMatchActionMessage(match, "result_added")
+    : notification.message || formatNotificationType(notification.type);
+  const detail = [
+    match ? formatNotificationMatchTitle(match) : "",
+    match ? formatReadableMatchWindow(match) : "",
+    formatNotificationTimestamp(notification.createdAt)
+  ].filter(Boolean).join(" - ");
+  return { message, detail };
+}
+
+function formatMatchActionMessage(match, type) {
+  const actorName = getNotificationActorName(match, type);
+  if (type === "match_created") return `Match created by ${actorName}`;
+  if (type === "match_edited") return `Match edited by ${actorName}`;
+  if (type === "result_added") return `Result added by ${actorName}`;
+  return "Notification";
+}
+
+function getNotificationActorName(match, type) {
+  const currentUser = getCurrentUser();
+  if (type === "match_created") {
+    return match.createdByName || getUserName(match.createdBy) || currentUser?.name || "Unknown";
+  }
+  return match.updatedByName
+    || getUserName(match.updatedBy)
+    || currentUser?.name
+    || match.createdByName
+    || getUserName(match.createdBy)
+    || "Unknown";
+}
+
+function formatNotificationMatchTitle(match) {
+  return match.title || `${match.teamAName || "Team A"} vs ${match.teamBName || "Team B"}`;
 }
 
 function handleNotificationOpen(notification) {

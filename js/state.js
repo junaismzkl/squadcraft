@@ -84,6 +84,7 @@ export const state = {
     users: [],
     currentUserId: "",
     authProfileId: "",
+    statsResetAt: "",
     activityLog: []
   },
   selectedPlayerIds: new Set(),
@@ -243,6 +244,23 @@ export function setMatches(matches) {
     after: state.data.matches.length
   });
   debugLog("state.matches updated", { count: state.data.matches.length });
+}
+
+export function resetDerivedStats() {
+  const beforeSummary = summarizePlayerStats(state.data.players);
+  const resetAt = new Date().toISOString();
+  state.data = {
+    ...state.data,
+    statsResetAt: resetAt,
+    players: applyDerivedStatsToPlayers(state.data.players, state.data.matches, "resetDerivedStats")
+  };
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] stats reset applied`, {
+    resetAt,
+    playersAffected: state.data.players.length,
+    before: beforeSummary,
+    after: summarizePlayerStats(state.data.players)
+  });
+  persist();
 }
 
 export function updateMatch(matchId, updater) {
@@ -548,6 +566,7 @@ function loadStateData() {
     users: [],
     currentUserId: "",
     authProfileId: "",
+    statsResetAt: "",
     activityLog: []
   };
   const saved = loadMatches();
@@ -559,11 +578,13 @@ function loadStateData() {
   saved.users = [];
   saved.currentUserId = "";
   saved.authProfileId = "";
+  saved.statsResetAt = typeof saved.statsResetAt === "string" ? saved.statsResetAt : "";
   state.data = {
     ...state.data,
     users: saved.users,
     currentUserId: saved.currentUserId,
-    authProfileId: ""
+    authProfileId: "",
+    statsResetAt: saved.statsResetAt
   };
   saved.players = [];
   saved.matches = [];
@@ -583,7 +604,8 @@ export function initState() {
   state.data = {
     ...state.data,
     currentUserId: data.currentUserId,
-    authProfileId: ""
+    authProfileId: "",
+    statsResetAt: data.statsResetAt || ""
   };
   setUsers(data.users);
   setPlayers([]);
@@ -607,6 +629,7 @@ export function persist() {
     users: normalizeUsers(state.data.users),
     currentUserId: state.data.currentUserId || "",
     authProfileId: state.data.authProfileId || "",
+    statsResetAt: state.data.statsResetAt || "",
     activityLog: [...(state.data.activityLog || [])]
   });
 }
@@ -1193,7 +1216,9 @@ export function countScorers(scorers) {
 }
 
 function applyDerivedStatsToPlayers(players = [], matches = [], source = "") {
-  const dedupedMatches = dedupeMatchesById([...(Array.isArray(matches) ? matches : [])].map(normalizeMatchRecord));
+  const resetAt = getStatsResetTime();
+  const dedupedMatches = dedupeMatchesById([...(Array.isArray(matches) ? matches : [])].map(normalizeMatchRecord))
+    .filter((match) => getMatchFreshness(match) > resetAt);
   const statsByPlayerId = derivePlayerStatsFromMatches(dedupedMatches);
   const nextPlayers = [...(Array.isArray(players) ? players : [])].map((player) => ({
     ...player,
@@ -1204,6 +1229,31 @@ function applyDerivedStatsToPlayers(players = [], matches = [], source = "") {
   }));
   logDerivedStatsRecompute(source, dedupedMatches, nextPlayers, statsByPlayerId);
   return nextPlayers;
+}
+
+function getStatsResetTime() {
+  const resetTime = new Date(state.data.statsResetAt || "").getTime();
+  return Number.isNaN(resetTime) ? 0 : resetTime;
+}
+
+function summarizePlayerStats(players = []) {
+  return [...(Array.isArray(players) ? players : [])].reduce((summary, player) => {
+    const stats = getPlayerStats(player);
+    summary.players += 1;
+    summary.matches += Number(stats.matches) || 0;
+    summary.goals += Number(stats.goals) || 0;
+    summary.wins += Number(stats.wins) || 0;
+    summary.motm += Number(stats.motm) || 0;
+    summary.cleanSheets += Number(stats.cleanSheets) || 0;
+    return summary;
+  }, {
+    players: 0,
+    matches: 0,
+    goals: 0,
+    wins: 0,
+    motm: 0,
+    cleanSheets: 0
+  });
 }
 
 function getCurrentTeamCounts() {
