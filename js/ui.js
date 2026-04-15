@@ -1406,11 +1406,13 @@ export function renderStats() {
 function renderStatsResetButton() {
   const existingButton = document.querySelector("#reset-stats-button");
   existingButton?.remove();
+  const shouldRenderResetStats = isSignedInSuperAdmin();
   console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] stats reset visibility`, {
+    currentProfileId: authState.currentProfile?.id || "",
     currentUserRole: authState.currentProfile?.role || "",
-    canResetStats: canManageRoles()
+    shouldRenderResetStats
   });
-  if (!canManageRoles() || !els.leaderboard?.parentElement) return;
+  if (!shouldRenderResetStats || !els.leaderboard?.parentElement) return;
 
   const button = document.createElement("button");
   button.id = "reset-stats-button";
@@ -1423,10 +1425,11 @@ function renderStatsResetButton() {
 
 function handleResetStats() {
   console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] stats reset clicked`, {
+    currentProfileId: authState.currentProfile?.id || "",
     currentUserRole: authState.currentProfile?.role || "",
     playersAffected: state.data.players.length
   });
-  if (!canManageRoles()) return;
+  if (!isSignedInSuperAdmin()) return;
   const confirmed = confirm("Reset player stats? Match history, players, profiles, approvals, and notifications will stay unchanged.");
   console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] stats reset confirmation`, {
     currentUserRole: authState.currentProfile?.role || "",
@@ -1442,6 +1445,10 @@ function handleResetStats() {
     after: summarizeVisibleStats()
   });
   render();
+}
+
+function isSignedInSuperAdmin() {
+  return authState.currentProfile?.role === "super_admin";
 }
 
 function summarizeVisibleStats() {
