@@ -80,21 +80,57 @@ export async function saveSharedMatch(localMatch) {
   }
 
   const playerRows = localMatchPlayersToRemoteRows(localMatch, remoteMatchId);
-  if (playerRows.length) {
-    const { error: playerError } = await supabase
-      .from(MATCH_PLAYERS_TABLE)
-      .insert(playerRows);
+  if (!playerRows.length) {
+    if (!isExistingRemoteMatch) await rollbackInsertedMatch(remoteMatchId);
+    return { ok: false, message: "Cannot save match without team players." };
+  }
 
-    if (playerError) {
-      console.error("Could not insert shared match players into Supabase.", {
-        error: playerError,
-        rows: playerRows
-      });
-      return { ok: false, message: playerError.message };
-    }
+  const { data: savedPlayerRows, error: playerError } = await supabase
+    .from(MATCH_PLAYERS_TABLE)
+    .insert(playerRows)
+    .select("id, match_id, team");
+
+  if (playerError) {
+    if (!isExistingRemoteMatch) await rollbackInsertedMatch(remoteMatchId);
+    console.error("Could not insert shared match players into Supabase.", {
+      error: playerError,
+      rows: playerRows
+    });
+    return { ok: false, message: playerError.message };
+  }
+
+  if ((savedPlayerRows || []).length !== playerRows.length) {
+    if (!isExistingRemoteMatch) await rollbackInsertedMatch(remoteMatchId);
+    console.error("Shared match player insert returned an unexpected row count.", {
+      expected: playerRows.length,
+      actual: (savedPlayerRows || []).length,
+      rows: playerRows,
+      savedRows: savedPlayerRows || []
+    });
+    return { ok: false, message: "Could not save all match players." };
   }
 
   return { ok: true, match: savedMatch };
+}
+
+async function rollbackInsertedMatch(matchId) {
+  if (!matchId) return;
+
+  const { error: playerDeleteError } = await supabase
+    .from(MATCH_PLAYERS_TABLE)
+    .delete()
+    .eq("match_id", matchId);
+  if (playerDeleteError) {
+    console.warn("Could not rollback shared match players after save failure.", playerDeleteError);
+  }
+
+  const { error: matchDeleteError } = await supabase
+    .from(MATCHES_TABLE)
+    .delete()
+    .eq("id", matchId);
+  if (matchDeleteError) {
+    console.warn("Could not rollback shared match after save failure.", matchDeleteError);
+  }
 }
 
 async function saveMatchRow(localMatch) {

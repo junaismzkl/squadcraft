@@ -1,6 +1,6 @@
 import { authState, initAuth } from "./auth.js";
 import { bindEvents } from "./events.js";
-import { loadSharedMatchesIntoState, syncMatchToSupabase } from "./matchStore.js";
+import { loadSharedMatchesIntoState, syncMatchToSupabase } from "./matchStore.js?v=match-save-v4";
 import { loadSharedPlayersIntoState } from "./playerStore.js";
 import { initState } from "./state.js";
 import { initUI, render } from "./ui.js";

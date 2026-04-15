@@ -1,6 +1,6 @@
 import { els } from "./dom.js";
 import { authState, createAccountWithEmailPassword, saveCurrentProfile, signInWithEmailPassword, signOutCurrentUser } from "./auth.js";
-import { loadSharedMatchesIntoState } from "./matchStore.js";
+import { loadSharedMatchesIntoState } from "./matchStore.js?v=match-save-v4";
 import { generateTeams, getMatchSettings, toggleSelectAllPlayers } from "./match.js";
 import { loadSharedPlayersIntoState } from "./playerStore.js";
 import { addScorerRow, openResultPanel, saveMatchResult, updateScoreFromScorers } from "./result.js";

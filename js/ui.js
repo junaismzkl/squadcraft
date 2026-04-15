@@ -2,7 +2,7 @@ import { els } from "./dom.js";
 import { approveUserProfile, authState, canApproveUsers, canManageRoles, isApprovedProfile, loadPendingProfiles, updateUserRole } from "./auth.js";
 import { generateLineupPositions } from "./formation.js";
 import { clearLiveTimer, renderLiveMatch } from "./liveMatch.js";
-import { deleteSharedMatch } from "./matchStore.js";
+import { deleteSharedMatch } from "./matchStore.js?v=match-save-v4";
 import { deactivateProfilePlayer, loadSharedPlayersIntoState, updateProfilePlayerDetails, updateProfilePlayerRole } from "./playerStore.js";
 import {
   getMatchSettings,
