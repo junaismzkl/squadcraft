@@ -443,10 +443,10 @@ function appendTeamRows(rows, players, matchId, team, auditFields = {}) {
     };
     console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] match_players outgoing row`, {
       playerName: player?.name || "",
-      isGuestSourceValue: player?.isGuest,
+      isGuestInput: player?.isGuest,
+      outgoingProfileId: row.profile_id,
+      outgoingGuestName: row.guest_name,
       outgoingIsGuest: row.is_guest,
-      profile_id: row.profile_id,
-      guest_name: row.guest_name,
       team: row.team
     });
     rows.push(row);
