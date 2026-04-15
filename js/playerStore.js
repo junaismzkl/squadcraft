@@ -1,5 +1,5 @@
-import { supabase } from "./supabaseClient.js";
-import { normalizePlayerRecord, setPlayers, state } from "./state.js";
+import { supabase } from "./supabaseClient.js?v=match-debug-v5";
+import { normalizePlayerRecord, setPlayers, state } from "./state.js?v=match-debug-v5";
 
 const PROFILE_PLAYER_FIELDS = "id,name,display_name,avatar_url,role,is_active,approval_status,approved_by,approved_at,created_at,updated_at,primary_position,secondary_position,third_position,player_profile_completed,rating,dominant_foot,jersey_number";
 

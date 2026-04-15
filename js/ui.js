@@ -1,9 +1,9 @@
-import { els } from "./dom.js";
-import { approveUserProfile, authState, canApproveUsers, canManageRoles, isApprovedProfile, loadPendingProfiles, updateUserRole } from "./auth.js";
-import { generateLineupPositions } from "./formation.js";
-import { clearLiveTimer, renderLiveMatch } from "./liveMatch.js";
-import { deleteSharedMatch } from "./matchStore.js?v=match-save-v4";
-import { deactivateProfilePlayer, loadSharedPlayersIntoState, updateProfilePlayerDetails, updateProfilePlayerRole } from "./playerStore.js";
+import { els } from "./dom.js?v=match-debug-v5";
+import { approveUserProfile, authState, canApproveUsers, canManageRoles, isApprovedProfile, loadPendingProfiles, updateUserRole } from "./auth.js?v=match-debug-v5";
+import { generateLineupPositions } from "./formation.js?v=match-debug-v5";
+import { clearLiveTimer, renderLiveMatch } from "./liveMatch.js?v=match-debug-v5";
+import { deleteSharedMatch } from "./matchStore.js?v=match-debug-v5";
+import { deactivateProfilePlayer, loadSharedPlayersIntoState, updateProfilePlayerDetails, updateProfilePlayerRole } from "./playerStore.js?v=match-debug-v5";
 import {
   getMatchSettings,
   normalizeCaptains,
@@ -12,7 +12,7 @@ import {
   setCaptain,
   updateFormationOptions,
   validateSelectedPlayersForMatch
-} from "./match.js";
+} from "./match.js?v=match-debug-v5";
 import {
   appendPitchPlayers,
   createPitchCard,
@@ -20,13 +20,13 @@ import {
   renderFormationSelectors,
   renderPitchSurface,
   renderTeamHeaders
-} from "./pitchRenderer.js";
+} from "./pitchRenderer.js?v=match-debug-v5";
 import {
   openResultPanel,
   markCurrentMatchPendingResult,
   renderMotmOptions,
   renderResultSection
-} from "./result.js";
+} from "./result.js?v=match-debug-v5";
 import {
   addPlayer,
   addNotification,
@@ -85,9 +85,9 @@ import {
   syncNotificationsWithMatches,
   state,
   updateTeams
-} from "./state.js";
-import { balanceLabel, goalkeeperNote, regenerateTeamLineup, teamRating } from "./teamGenerator.js";
-import { clampRating, escapeHtml, formatDate, readFileAsDataUrl, resizeImageDataUrl } from "./utils.js";
+} from "./state.js?v=match-debug-v5";
+import { balanceLabel, goalkeeperNote, regenerateTeamLineup, teamRating } from "./teamGenerator.js?v=match-debug-v5";
+import { clampRating, escapeHtml, formatDate, readFileAsDataUrl, resizeImageDataUrl } from "./utils.js?v=match-debug-v5";
 
 let matchStatusRefreshId = null;
 let matchWizardStep = 0;
@@ -132,6 +132,8 @@ const imagePreviewState = {
   dragOriginX: 0,
   dragOriginY: 0
 };
+
+const MATCH_DEBUG_VERSION = "match-debug-v5";
 
 export function render() {
   if (!state.isReady) return;
@@ -425,6 +427,13 @@ export function editPlayer(id) {
 }
 
 export function openMatchInViewMode(match, options = {}) {
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] openMatchInViewMode`, {
+    matchId: match?.id || "",
+    location: match?.location || "",
+    teamAPlayers: match?.teamAPlayers?.length || match?.teamA?.length || 0,
+    teamBPlayers: match?.teamBPlayers?.length || match?.teamB?.length || 0,
+    switchTab: Boolean(options.switchTab)
+  });
   restoreUpcomingMatch(match);
   isEditingMatch = false;
   editingMatchSnapshot = null;
@@ -1446,6 +1455,11 @@ export function startMatchCreation() {
 
 export function createMatchAndReturnHome() {
   if (isEditingMatch) {
+    console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] createMatch button routed to finishMatchEditing`, {
+      matchId: state.currentTeams?.id || "",
+      teamAPlayers: state.currentTeams?.teamA?.length || 0,
+      teamBPlayers: state.currentTeams?.teamB?.length || 0
+    });
     finishMatchEditing();
     return;
   }
@@ -1460,6 +1474,12 @@ export function createMatchAndReturnHome() {
     status: "upcoming",
     auditAction: "match_created",
     logAction: "match_created"
+  });
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] createMatchAndReturnHome persisted local match`, {
+    matchId: savedMatch?.id || "",
+    location: savedMatch?.location || "",
+    teamAPlayers: savedMatch?.teamAPlayers?.length || 0,
+    teamBPlayers: savedMatch?.teamBPlayers?.length || 0
   });
   if (!savedMatch) {
     console.error("Match creation did not produce a saved local match.", { currentTeams: state.currentTeams });
@@ -1484,6 +1504,13 @@ export function goToMatchTimeStep() {
 }
 
 export function goToPlayerSelectionStep() {
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] goToPlayerSelectionStep`, {
+    matchId: state.currentTeams?.id || "",
+    isEditingMatch,
+    isDraft: Boolean(state.currentTeams?.isDraft),
+    teamAPlayers: state.currentTeams?.teamA?.length || 0,
+    teamBPlayers: state.currentTeams?.teamB?.length || 0
+  });
   matchWizardStep = 2;
   renderMatchWizard();
 }
@@ -2640,6 +2667,12 @@ export function closeNotificationsPanel() {
 function finishMatchEditing() {
   if (!state.currentTeams) return;
   const originalMatchId = editingMatchSnapshot?.id || state.currentTeams.id;
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] finishMatchEditing`, {
+    currentMatchId: state.currentTeams.id,
+    originalMatchId,
+    teamAPlayers: state.currentTeams.teamA?.length || 0,
+    teamBPlayers: state.currentTeams.teamB?.length || 0
+  });
   updateTeams((teams) => ({
     ...teams,
     id: originalMatchId,

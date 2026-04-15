@@ -1,7 +1,7 @@
-import { els } from "./dom.js";
-import { addLiveGoal, completeLiveMatch, setLiveMotm } from "./result.js";
-import { countScorers, getCurrentMatchPlayers, matchNowTimeValue, matchStartTime, OWN_GOAL_ID, scorerGoalTotal } from "./state.js";
-import { escapeHtml } from "./utils.js";
+import { els } from "./dom.js?v=match-debug-v5";
+import { addLiveGoal, completeLiveMatch, setLiveMotm } from "./result.js?v=match-debug-v5";
+import { countScorers, getCurrentMatchPlayers, matchNowTimeValue, matchStartTime, OWN_GOAL_ID, scorerGoalTotal } from "./state.js?v=match-debug-v5";
+import { escapeHtml } from "./utils.js?v=match-debug-v5";
 
 let liveTimerId = null;
 let highlightTimeoutId = null;

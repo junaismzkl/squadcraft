@@ -1,6 +1,6 @@
-import { getFormationOptions, getFormationRoleSlots } from "./formation.js";
-import { getPlayerPositions, isGoalkeeperPlayer } from "./state.js";
-import { normalizeStoredRating } from "./utils.js";
+import { getFormationOptions, getFormationRoleSlots } from "./formation.js?v=match-debug-v5";
+import { getPlayerPositions, isGoalkeeperPlayer } from "./state.js?v=match-debug-v5";
+import { normalizeStoredRating } from "./utils.js?v=match-debug-v5";
 
 export const EIGHT_V_EIGHT_SLOTS = ["GK", "WB", "CB", "WB", "CM", "WF", "CF", "WF"];
 export const MAX_TEAM_RATING_DIFF = 8;

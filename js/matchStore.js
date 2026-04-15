@@ -1,9 +1,10 @@
-import { authState } from "./auth.js";
-import { supabase } from "./supabaseClient.js";
-import { normalizeMatchMetadata, normalizePlayerRecord, setMatches, snapshotTeam, state, updateTeams } from "./state.js";
+import { authState } from "./auth.js?v=match-debug-v5";
+import { supabase } from "./supabaseClient.js?v=match-debug-v5";
+import { normalizeMatchMetadata, normalizePlayerRecord, setMatches, snapshotTeam, state, updateTeams } from "./state.js?v=match-debug-v5";
 
 const MATCHES_TABLE = "matches";
 const MATCH_PLAYERS_TABLE = "match_players";
+const MATCH_DEBUG_VERSION = "match-debug-v5";
 
 export async function loadSharedMatchesIntoState() {
   if (!authState.isAuthenticated) {
@@ -26,11 +27,23 @@ export async function loadSharedMatchesIntoState() {
     ? await loadMatchPlayerRows(matchIds)
     : { ok: true, rows: [] };
 
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] loadSharedMatchesIntoState fetched`, {
+    matchRows: (matchRows || []).length,
+    matchPlayerRows: (playerRowsResult.rows || []).length,
+    matchIds
+  });
+
   if (!playerRowsResult.ok) {
     console.warn("Could not load shared match players from Supabase.", playerRowsResult.error);
   }
 
   const playersByMatch = groupRowsByMatch(playerRowsResult.rows || []);
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] match_players grouped`, [...playersByMatch.entries()].map(([matchId, rows]) => ({
+    matchId,
+    rows: rows.length,
+    teamA: rows.filter((row) => String(row.team || "").toUpperCase() === "A").length,
+    teamB: rows.filter((row) => String(row.team || "").toUpperCase() === "B").length
+  })));
   const profilesById = await loadMatchAuditProfiles(matchRows || []);
   const matches = (matchRows || []).map((matchRow) => remoteMatchToLocal(
     matchRow,
@@ -52,6 +65,13 @@ export async function saveSharedMatch(localMatch) {
   }
 
   const isExistingRemoteMatch = isUuid(localMatch.id);
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] saveSharedMatch input`, {
+    matchId: localMatch.id,
+    isExistingRemoteMatch,
+    location: localMatch.location || "",
+    teamAPlayers: getPersistedTeamPlayers(localMatch, "A").length,
+    teamBPlayers: getPersistedTeamPlayers(localMatch, "B").length
+  });
   const { data: savedMatch, error: matchError } = await saveMatchRow(localMatch);
   if (matchError) {
     console.error("Could not insert shared match into Supabase.", {
@@ -62,6 +82,12 @@ export async function saveSharedMatch(localMatch) {
   }
 
   const remoteMatchId = savedMatch.id;
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] public.matches saved`, {
+    localMatchId: localMatch.id,
+    remoteMatchId,
+    location: savedMatch.location || "",
+    status: savedMatch.status || ""
+  });
   if (remoteMatchId && remoteMatchId !== localMatch.id) {
     replaceLocalMatchId(localMatch.id, remoteMatchId);
     localMatch = { ...localMatch, id: remoteMatchId };
@@ -80,6 +106,13 @@ export async function saveSharedMatch(localMatch) {
   }
 
   const playerRows = localMatchPlayersToRemoteRows(localMatch, remoteMatchId);
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] public.match_players insert payload`, {
+    matchId: remoteMatchId,
+    rows: playerRows.length,
+    teamA: playerRows.filter((row) => row.team === "A").length,
+    teamB: playerRows.filter((row) => row.team === "B").length,
+    sample: playerRows.slice(0, 3)
+  });
   if (!playerRows.length) {
     if (!isExistingRemoteMatch) await rollbackInsertedMatch(remoteMatchId);
     return { ok: false, message: "Cannot save match without team players." };
@@ -110,6 +143,14 @@ export async function saveSharedMatch(localMatch) {
     return { ok: false, message: "Could not save all match players." };
   }
 
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] public.match_players inserted`, {
+    matchId: remoteMatchId,
+    expectedRows: playerRows.length,
+    insertedRows: (savedPlayerRows || []).length,
+    insertedTeamA: (savedPlayerRows || []).filter((row) => row.team === "A").length,
+    insertedTeamB: (savedPlayerRows || []).filter((row) => row.team === "B").length
+  });
+
   return { ok: true, match: savedMatch };
 }
 
@@ -135,6 +176,15 @@ async function rollbackInsertedMatch(matchId) {
 
 async function saveMatchRow(localMatch) {
   const matchRow = localMatchToRemoteMatch(localMatch);
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] public.matches save payload`, {
+    matchId: localMatch.id,
+    isUpsert: isUuid(localMatch.id),
+    location: matchRow.location,
+    locationType: typeof matchRow.location,
+    teamAPlayers: getPersistedTeamPlayers(localMatch, "A").length,
+    teamBPlayers: getPersistedTeamPlayers(localMatch, "B").length,
+    row: matchRow
+  });
   const query = isUuid(localMatch.id)
     ? supabase.from(MATCHES_TABLE).upsert({ ...matchRow, id: localMatch.id }).select("*").single()
     : supabase.from(MATCHES_TABLE).insert(matchRow).select("*").single();
@@ -289,6 +339,16 @@ function remoteMatchToLocal(matchRow, playerRows, profilesById = new Map()) {
   const embeddedTeamB = snapshotTeam(getPersistedTeamPlayers(legacyMatchPayload, "B"));
   const teamAPlayers = remoteTeamPlayersToLocal(playerRows, "A", embeddedTeamA);
   const teamBPlayers = remoteTeamPlayersToLocal(playerRows, "B", embeddedTeamB);
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] remoteMatchToLocal`, {
+    matchId: matchRow.id,
+    rawLocation: matchRow.location,
+    parsedLocation: locationData.location,
+    playerRows: playerRows.length,
+    teamAPlayers: teamAPlayers.length,
+    teamBPlayers: teamBPlayers.length,
+    legacyEmbeddedTeamA: embeddedTeamA.length,
+    legacyEmbeddedTeamB: embeddedTeamB.length
+  });
   const createdBy = matchRow.created_by || matchRow.createdBy || "";
   const updatedBy = matchRow.updated_by || matchRow.updatedBy || matchRow.edited_by || matchRow.editedBy || "";
   const createdByProfile = profilesById.get(createdBy);

@@ -1,9 +1,9 @@
-import { els } from "./dom.js";
-import { authState, createAccountWithEmailPassword, saveCurrentProfile, signInWithEmailPassword, signOutCurrentUser } from "./auth.js";
-import { loadSharedMatchesIntoState } from "./matchStore.js?v=match-save-v4";
-import { generateTeams, getMatchSettings, toggleSelectAllPlayers } from "./match.js";
-import { loadSharedPlayersIntoState } from "./playerStore.js";
-import { addScorerRow, openResultPanel, saveMatchResult, updateScoreFromScorers } from "./result.js";
+import { els } from "./dom.js?v=match-debug-v5";
+import { authState, createAccountWithEmailPassword, saveCurrentProfile, signInWithEmailPassword, signOutCurrentUser } from "./auth.js?v=match-debug-v5";
+import { loadSharedMatchesIntoState } from "./matchStore.js?v=match-debug-v5";
+import { generateTeams, getMatchSettings, toggleSelectAllPlayers } from "./match.js?v=match-debug-v5";
+import { loadSharedPlayersIntoState } from "./playerStore.js?v=match-debug-v5";
+import { addScorerRow, openResultPanel, saveMatchResult, updateScoreFromScorers } from "./result.js?v=match-debug-v5";
 import {
   addQuickGuest,
   cancelMatchCreation,
@@ -33,7 +33,7 @@ import {
   triggerImageUpload,
   toggleNotificationsPanel,
   toggleGuestForm
-} from "./ui.js";
+} from "./ui.js?v=match-debug-v5";
 
 export function bindEvents() {
   window.addEventListener("auth:changed", handleAuthChanged);

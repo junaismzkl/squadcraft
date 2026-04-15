@@ -1,4 +1,4 @@
-import { debugLog } from "./debug.js";
+import { debugLog } from "./debug.js?v=match-debug-v5";
 import {
   addNotification,
   canEditMatch,
@@ -20,8 +20,8 @@ import {
   setPlayers,
   state,
   updateTeams
-} from "./state.js";
-import { escapeHtml } from "./utils.js";
+} from "./state.js?v=match-debug-v5";
+import { escapeHtml } from "./utils.js?v=match-debug-v5";
 
 export function renderMotmOptions(els) {
   els.motmSelect.innerHTML = "";

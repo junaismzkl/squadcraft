@@ -1,5 +1,5 @@
-import { setAuthenticatedProfile, clearAuthenticatedProfile } from "./state.js";
-import { supabase } from "./supabaseClient.js";
+import { setAuthenticatedProfile, clearAuthenticatedProfile } from "./state.js?v=match-debug-v5";
+import { supabase } from "./supabaseClient.js?v=match-debug-v5";
 
 export const authState = {
   currentSession: null,

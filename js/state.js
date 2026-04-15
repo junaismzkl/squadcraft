@@ -1,8 +1,9 @@
-import { debugLog } from "./debug.js";
-import { loadMatches, saveMatches } from "./storage.js";
-import { escapeHtml, normalizeStoredRating, toDateTimeLocalValue } from "./utils.js";
+import { debugLog } from "./debug.js?v=match-debug-v5";
+import { loadMatches, saveMatches } from "./storage.js?v=match-debug-v5";
+import { escapeHtml, normalizeStoredRating, toDateTimeLocalValue } from "./utils.js?v=match-debug-v5";
 
 export const DATA_VERSION = 3;
+const MATCH_DEBUG_VERSION = "match-debug-v5";
 
 export const USER_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -998,6 +999,15 @@ export function persistCurrentMatch(overrides = {}) {
   } else {
     setMatches([match, ...state.data.matches]);
   }
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] persistCurrentMatch`, {
+    matchId: match.id,
+    status: match.status,
+    location: match.location || "",
+    teamAPlayers: match.teamAPlayers?.length || 0,
+    teamBPlayers: match.teamBPlayers?.length || 0,
+    auditAction,
+    forceSave
+  });
   if (logAction || auditAction) {
     logActivity(logAction || auditAction, "match", match.id, auditDetails);
   }

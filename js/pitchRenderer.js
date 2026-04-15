@@ -1,7 +1,7 @@
-import { generateLineupPositions, getFormationOptions, getPitchSlots, shortRole } from "./formation.js";
-import { DEFAULT_AVATAR, motmName, scorersText, serializeCurrentMatch } from "./state.js";
-import { teamRating } from "./teamGenerator.js";
-import { escapeHtml } from "./utils.js";
+import { generateLineupPositions, getFormationOptions, getPitchSlots, shortRole } from "./formation.js?v=match-debug-v5";
+import { DEFAULT_AVATAR, motmName, scorersText, serializeCurrentMatch } from "./state.js?v=match-debug-v5";
+import { teamRating } from "./teamGenerator.js?v=match-debug-v5";
+import { escapeHtml } from "./utils.js?v=match-debug-v5";
 
 export function renderCompletedMatchSummary(teams) {
   const card = document.createElement("article");

@@ -1,6 +1,6 @@
-import { debugLog } from "./debug.js";
-import { formationsBySize, getPlayerPositions, roleFallbacks, roles } from "./state.js";
-import { normalizeStoredRating } from "./utils.js";
+import { debugLog } from "./debug.js?v=match-debug-v5";
+import { formationsBySize, getPlayerPositions, roleFallbacks, roles } from "./state.js?v=match-debug-v5";
+import { normalizeStoredRating } from "./utils.js?v=match-debug-v5";
 
 const STRICT_FALLBACK = {
   CB: ["WB"],

@@ -1,5 +1,5 @@
-import { debugLog } from "./debug.js";
-import { getFormationOptions, validateFormationString } from "./formation.js";
+import { debugLog } from "./debug.js?v=match-debug-v5";
+import { getFormationOptions, validateFormationString } from "./formation.js?v=match-debug-v5";
 import {
   clearMatchGuestPlayers,
   clearSelectedPlayerIds,
@@ -17,9 +17,11 @@ import {
   setTeams,
   state,
   updateTeams
-} from "./state.js";
-import { makeBalancedTeams } from "./teamGenerator.js";
-import { normalizeStoredRating } from "./utils.js";
+} from "./state.js?v=match-debug-v5";
+import { makeBalancedTeams } from "./teamGenerator.js?v=match-debug-v5";
+import { normalizeStoredRating } from "./utils.js?v=match-debug-v5";
+
+const MATCH_DEBUG_VERSION = "match-debug-v5";
 
 export function updateFormationOptions() {
   if (state.currentTeams) normalizeTeamFormations();
@@ -108,6 +110,7 @@ export function generateTeams(matchTime = "", reshuffle = false, options = {}) {
       };
     }
 
+    const previousMatchId = state.currentTeams?.id || "";
     const isEditingSavedMatch = Boolean(state.currentTeams && !state.currentTeams.isDraft && state.currentTeams.status === "upcoming");
     const existingMatchId = (reshuffle || isEditingSavedMatch) && state.currentTeams?.status === "upcoming"
       ? state.currentTeams.id
@@ -138,6 +141,16 @@ export function generateTeams(matchTime = "", reshuffle = false, options = {}) {
       scorersA: [],
       scorersB: [],
       fallbackUsed: Boolean(generatedTeams.fallbackUsed)
+    });
+
+    console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] generateTeams result`, {
+      previousMatchId,
+      existingMatchId,
+      isEditingSavedMatch,
+      reshuffle,
+      isDraft: state.currentTeams?.isDraft,
+      teamAPlayers: state.currentTeams?.teamA?.length || 0,
+      teamBPlayers: state.currentTeams?.teamB?.length || 0
     });
 
     debugLog("match created", {
