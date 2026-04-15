@@ -1274,6 +1274,7 @@ export function renderTeams() {
   const currentMatchStatus = state.currentTeams ? getMatchStatus(state.currentTeams) : null;
   const isDraftMatch = Boolean(state.currentTeams?.isDraft);
   const isSavedMatch = Boolean(state.currentTeams && !state.currentTeams.isDraft);
+  const canFinishEditing = Boolean(isSavedMatch && isEditingMatch && currentMatchStatus === "upcoming");
   const isReadOnlySavedMatch = Boolean(isSavedMatch && !isEditingMatch);
   const finishedAwaitingResult = hasFinishedAwaitingResult(state.currentTeams, currentMatchStatus);
   const canOpenResult = Boolean(
@@ -1281,7 +1282,8 @@ export function renderTeams() {
   );
   els.matchFinishedModal.classList.toggle("hidden", !finishedAwaitingResult || state.currentTeams?.resultOpen);
   els.resultForm.classList.toggle("hidden", !canOpenResult || !state.currentTeams?.resultOpen);
-  els.createMatch.classList.toggle("hidden", !isDraftMatch || currentMatchStatus !== "upcoming");
+  els.createMatch.classList.toggle("hidden", !(isDraftMatch || canFinishEditing) || currentMatchStatus !== "upcoming");
+  els.createMatch.textContent = canFinishEditing ? "Finish Editing" : "Create Match";
   if (!state.currentTeams) {
     clearLiveTimer();
     els.reshuffleTeams.disabled = true;
@@ -1304,7 +1306,7 @@ export function renderTeams() {
   els.teamBalanceNote.textContent = teamsAreBalanced
     ? `${balanceLabel(difference)} Rating difference: ${difference}. ${goalkeeperNote(state.currentTeams)}${fallbackNote}`
     : "Teams are not balanced. Please make equal players before saving.";
-  els.createMatch.disabled = !state.currentTeams?.isDraft || !teamsAreBalanced;
+  els.createMatch.disabled = !(state.currentTeams?.isDraft || canFinishEditing) || !teamsAreBalanced;
   normalizeCaptains();
   normalizeTeamFormations();
 
@@ -1443,6 +1445,11 @@ export function startMatchCreation() {
 }
 
 export function createMatchAndReturnHome() {
+  if (isEditingMatch) {
+    finishMatchEditing();
+    return;
+  }
+
   if (!state.currentTeams?.isDraft) return;
   if (state.currentTeams.teamA.length !== state.currentTeams.teamB.length) {
     els.teamBalanceNote.textContent = "Teams must have equal number of players";
@@ -1901,7 +1908,9 @@ function hasMatchScheduleValue() {
 function updateMatchStepActions() {
   els.matchNextToPlayers.disabled = !hasValidScheduleInputs();
   els.generateTeams.disabled = !hasValidPlayerSelection();
-  els.createMatch.disabled = !state.currentTeams?.isDraft
+  els.generateTeams.textContent = isEditingMatch ? "Update Lineup" : "Generate Teams";
+  els.createMatch.textContent = isEditingMatch ? "Finish Editing" : "Create Match";
+  els.createMatch.disabled = !(state.currentTeams?.isDraft || isEditingMatch)
     || (Boolean(state.currentTeams) && state.currentTeams.teamA.length !== state.currentTeams.teamB.length);
 }
 
@@ -2849,4 +2858,6 @@ function resetMatchSetupState() {
   els.resultForm.classList.add("hidden");
   els.matchFinishedModal.classList.add("hidden");
   els.createMatch.classList.add("hidden");
+  els.createMatch.textContent = "Create Match";
+  els.generateTeams.textContent = "Generate Teams";
 }
