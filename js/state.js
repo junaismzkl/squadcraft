@@ -134,6 +134,13 @@ export function derivePlayerStatsFromMatches(matches = []) {
   }, {});
 }
 
+export function getPlayerStats(player = {}) {
+  return {
+    ...createDefaultPlayerStats(),
+    ...(player.stats || {})
+  };
+}
+
 export function normalizePositionCode(value) {
   const directValue = String(value || "").trim().toUpperCase();
   if (roles.includes(directValue)) return directValue;
@@ -188,7 +195,7 @@ export function setReady(isReady) {
 }
 
 export function setPlayers(players) {
-  const safePlayers = applyDerivedStatsToPlayers(sanitizePermanentPlayers(players), state.data.matches);
+  const safePlayers = applyDerivedStatsToPlayers(sanitizePermanentPlayers(players), state.data.matches, "setPlayers");
   state.data = {
     ...state.data,
     players: safePlayers
@@ -226,7 +233,7 @@ export function setMatches(matches) {
   state.data = {
     ...state.data,
     matches: safeMatches,
-    players: applyDerivedStatsToPlayers(state.data.players, safeMatches)
+    players: applyDerivedStatsToPlayers(state.data.players, safeMatches, "setMatches")
   };
   debugLog("state.matches updated", { count: state.data.matches.length });
 }
@@ -1145,15 +1152,43 @@ export function countScorers(scorers) {
   }, {});
 }
 
-function applyDerivedStatsToPlayers(players = [], matches = []) {
+function applyDerivedStatsToPlayers(players = [], matches = [], source = "") {
   const statsByPlayerId = derivePlayerStatsFromMatches(matches);
-  return [...(Array.isArray(players) ? players : [])].map((player) => ({
+  const nextPlayers = [...(Array.isArray(players) ? players : [])].map((player) => ({
     ...player,
     stats: {
       ...createDefaultPlayerStats(),
       ...(statsByPlayerId[player.id] || {})
     }
   }));
+  logDerivedStatsRecompute(source, matches, nextPlayers, statsByPlayerId);
+  return nextPlayers;
+}
+
+function logDerivedStatsRecompute(source, matches = [], players = [], statsByPlayerId = {}) {
+  const completedMatches = [...(Array.isArray(matches) ? matches : [])]
+    .map((match) => normalizeMatchRecord(match))
+    .filter((match) => getMatchStatus(match) === "completed" && getMatchResult(match));
+  const statsRows = players.map((player) => ({
+    playerId: player.id,
+    name: player.name,
+    stats: getPlayerStats(player)
+  }));
+  const nonzeroStatsRows = statsRows.filter(({ stats }) => hasNonzeroStats(stats));
+
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] derived stats recomputed`, {
+    source,
+    completedMatchesCounted: completedMatches.length,
+    players: players.length,
+    playersWithDerivedStats: Object.keys(statsByPlayerId).length,
+    playersWithNonzeroStats: nonzeroStatsRows.length
+  });
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] derived stats per player`, statsRows);
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] players with nonzero derived stats`, nonzeroStatsRows);
+}
+
+function hasNonzeroStats(stats = {}) {
+  return Object.values(getPlayerStats({ stats })).some((value) => Number(value) > 0);
 }
 
 function getMatchOutcome(scoreA, scoreB) {

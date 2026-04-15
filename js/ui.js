@@ -46,6 +46,7 @@ import {
   DEFAULT_AVATAR,
   filterSelectedPlayerIds,
   getNotifications,
+  getPlayerStats,
   getPlayerPositions,
   getPrimaryPosition,
   getMatchStatus,
@@ -1134,6 +1135,7 @@ export function createPlayerCard(player, options = {}) {
     const primaryPosition = getPrimaryPosition(player);
     const positionSummary = formatPlayerPositions(player);
     const rating = clampRating(player.rating);
+    const stats = getPlayerStats(player);
     const actionMarkup = cardActionMarkup(player, options);
     const card = document.createElement("article");
   card.className = "player-card";
@@ -1164,12 +1166,12 @@ export function createPlayerCard(player, options = {}) {
             <span>\u2B50</span>
           </div>
           <div class="player-card-stats-row player-card-stats-values">
-            <strong>${player.stats?.matches ?? 0}</strong>
-            <strong>${player.stats?.wins ?? 0}</strong>
-            <strong>${player.stats?.draws ?? 0}</strong>
-            <strong>${player.stats?.losses ?? 0}</strong>
-            <strong>${isGoalkeeperPlayer(player) ? (player.stats?.cleanSheets ?? 0) : (player.stats?.goals ?? 0)}</strong>
-            <strong>${player.stats?.motm ?? 0}</strong>
+            <strong>${stats.matches}</strong>
+            <strong>${stats.wins}</strong>
+            <strong>${stats.draws}</strong>
+            <strong>${stats.losses}</strong>
+            <strong>${isGoalkeeperPlayer(player) ? stats.cleanSheets : stats.goals}</strong>
+            <strong>${stats.motm}</strong>
           </div>
         </div>
       </div>
@@ -1373,7 +1375,7 @@ export function renderStats() {
 
   const config = getStatsTabConfig(activeStatsTab);
   const players = [...state.data.players]
-    .map((player) => ({ player, value: Number(player.stats?.[config.key]) || 0 }))
+    .map((player) => ({ player, value: Number(getPlayerStats(player)[config.key]) || 0 }))
     .sort((a, b) => b.value - a.value || a.player.name.localeCompare(b.player.name));
 
   if (!players.some(({ value }) => value > 0)) {
