@@ -2910,25 +2910,33 @@ function addPendingResultNotificationIfMissing(match) {
 function addMatchActionNotification(match, type) {
   if (!match?.id) return;
   const now = Date.now();
-  const recentDuplicate = getNotifications().some((notification) =>
+  const actorId = getNotificationActorId(match, type);
+  const actorName = getNotificationActorName(match, type);
+  const message = formatMatchActionMessage(match, type, actorName);
+  const recentDuplicate = getNotifications().find((notification) =>
     notification.type === type
     && notification.matchId === match.id
     && now - new Date(notification.createdAt || 0).getTime() < 1000
   );
-  if (recentDuplicate) return;
-  const actorId = getNotificationActorId(match, type);
-  const actorName = getNotificationActorName(match, type);
   console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] match action notification actor`, {
     type,
     matchId: match.id,
     notificationActorId: actorId,
     notificationActorResolvedName: actorName
   });
+  if (recentDuplicate) {
+    addNotification({
+      ...recentDuplicate,
+      message
+    });
+    persist();
+    return;
+  }
   addNotification({
     id: `${type}-${match.id}-${now}`,
     matchId: match.id,
     type,
-    message: formatMatchActionMessage(match, type, actorName),
+    message,
     read: false,
     createdAt: new Date(now).toISOString()
   });
@@ -2958,9 +2966,9 @@ function formatMatchActionMessage(match, type, resolvedActorName = "") {
 
 function getNotificationActorId(match, type) {
   if (type === "match_created") {
-    return match.createdBy || authState.currentProfile?.id || authState.currentAuthUser?.id || "";
+    return authState.currentProfile?.id || authState.currentAuthUser?.id || match.createdBy || "";
   }
-  return match.updatedBy || authState.currentProfile?.id || authState.currentAuthUser?.id || match.createdBy || "";
+  return authState.currentProfile?.id || authState.currentAuthUser?.id || match.updatedBy || match.createdBy || "";
 }
 
 function getNotificationActorName(match, type) {

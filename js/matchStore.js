@@ -434,7 +434,7 @@ function localMatchPlayersToRemoteRows(match, matchId) {
   const rows = [];
   const metadata = normalizeMatchMetadata(match);
   const auditFields = {
-    created_by: metadata.createdBy || authState.currentProfile?.id || null,
+    created_by: authState.currentProfile?.id || metadata.createdBy || null,
     created_at: metadata.createdAt || new Date().toISOString()
   };
   appendTeamRows(rows, getPersistedTeamPlayers(match, "A"), matchId, "A", auditFields);
