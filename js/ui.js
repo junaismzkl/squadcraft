@@ -1474,6 +1474,7 @@ export function createMatchAndReturnHome() {
   const savedMatch = persistCurrentMatch({
     forceSave: true,
     status: "upcoming",
+    saveReason: "create",
     auditAction: "match_created",
     logAction: "match_created"
   });
@@ -1520,6 +1521,16 @@ export function goToPlayerSelectionStep() {
 export function goToLineupStep() {
   matchWizardStep = 3;
   renderMatchWizard();
+}
+
+export function getMatchGenerationOptions() {
+  const originalMatchId = isEditingMatch
+    ? editingMatchSnapshot?.id || state.currentTeams?.id || ""
+    : "";
+  return {
+    originalMatchId,
+    editingMatchSnapshot: originalMatchId ? cloneMatchSnapshot(editingMatchSnapshot || state.currentTeams) : null
+  };
 }
 
 export function startMatchStatusRefresh() {
@@ -2683,7 +2694,9 @@ function finishMatchEditing() {
   }));
   persistCurrentMatch({
     forceSave: true,
+    originalMatchId,
     status: "upcoming",
+    saveReason: "edit",
     auditAction: "match_edited",
     logAction: "match_edited"
   });

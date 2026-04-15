@@ -261,6 +261,7 @@ export function saveMatchResult(event, els) {
 
   persistCurrentMatch({
     status: "completed",
+    saveReason: "result",
     auditAction: "result_saved",
     logAction: "result_saved",
     auditDetails: {
@@ -331,6 +332,7 @@ export function completeLiveMatch(motmId) {
   persistCurrentMatch({
     status: "pending_result",
     liveMotmId: motmId || state.currentTeams.liveMotmId || "",
+    saveReason: "result",
     auditAction: "match_edited",
     logAction: "match_edited",
     auditDetails: { status: "pending_result" }
@@ -356,6 +358,7 @@ export function markCurrentMatchPendingResult() {
   }));
   persistCurrentMatch({
     status: "pending_result",
+    saveReason: "result",
     auditAction: "match_edited",
     logAction: "match_edited",
     auditDetails: { status: "pending_result" }
@@ -532,17 +535,10 @@ function canIncreaseGoals(teamKey, scorerIndex, els) {
 }
 
 function syncCurrentMatchIntoState() {
-  const serialized = state.currentTeams ? persistCurrentMatchAndReturn() : null;
-  if (!serialized) return;
-  setMatches(
-    state.data.matches.map((match) => (match.id === serialized.id ? serialized : match))
-  );
-}
-
-function persistCurrentMatchAndReturn() {
+  if (!state.currentTeams) return;
   const existingMatch = state.data.matches.find((match) => match.id === state.currentTeams?.id);
-  persistCurrentMatch({ status: state.currentTeams?.status || existingMatch?.status || "upcoming" });
-  return state.data.matches.find((match) => match.id === state.currentTeams?.id) || null;
+  if (!existingMatch) return;
+  setMatches(state.data.matches.map((match) => (match.id === existingMatch.id ? existingMatch : match)));
 }
 
 function getMatchOutcome(scoreA, scoreB) {

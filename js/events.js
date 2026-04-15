@@ -12,6 +12,7 @@ import {
   goToMatchLandingStep,
   goToMatchTimeStep,
   goToPlayerSelectionStep,
+  getMatchGenerationOptions,
   getImageUploadDraft,
   handleImageUploadChange,
   handleMatchScheduleChange,
@@ -340,7 +341,10 @@ function handleMatchTimeChange() {
 
 function handleGenerateTeams(reshuffle, options = {}) {
   clearManualSwapSelection();
-  const result = generateTeams(getMatchScheduleValue(), reshuffle, options);
+  const result = generateTeams(getMatchScheduleValue(), reshuffle, {
+    ...getMatchGenerationOptions(),
+    ...options
+  });
   if (!result.ok) {
     if (result.needsFallbackConfirmation) {
       openForcedGenerationPrompt(result, reshuffle);

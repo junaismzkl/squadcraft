@@ -229,7 +229,7 @@ export function updatePlayers(updater) {
 }
 
 export function setMatches(matches) {
-  const safeMatches = [...(Array.isArray(matches) ? matches : [])].map(normalizeMatchRecord);
+  const safeMatches = dedupeMatchesById([...(Array.isArray(matches) ? matches : [])].map(normalizeMatchRecord));
   state.data = {
     ...state.data,
     matches: safeMatches,
@@ -1001,10 +1001,20 @@ export function serializeCurrentMatch(overrides = {}) {
 }
 
 export function persistCurrentMatch(overrides = {}) {
-  const { forceSave = false, auditAction = "", auditDetails = {}, logAction = "", ...matchOverrides } = overrides;
+  const {
+    forceSave = false,
+    auditAction = "",
+    auditDetails = {},
+    logAction = "",
+    originalMatchId = "",
+    saveReason = auditAction || logAction || "match_save",
+    ...matchOverrides
+  } = overrides;
   if (state.currentTeams?.isDraft && !forceSave) return;
   const baseMatch = serializeCurrentMatch(matchOverrides);
   if (!baseMatch) return;
+  const localMatchIdBeforeSave = baseMatch.id;
+  if (originalMatchId) baseMatch.id = originalMatchId;
   const existingMatch = state.data.matches.find((item) => item.id === baseMatch.id);
   const user = getCurrentUser();
   if (!user) return;
@@ -1039,7 +1049,10 @@ export function persistCurrentMatch(overrides = {}) {
     setMatches([match, ...state.data.matches]);
   }
   console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] persistCurrentMatch`, {
+    saveReason,
     matchId: match.id,
+    localMatchIdBeforeSave,
+    originalMatchId,
     status: match.status,
     location: match.location || "",
     teamAPlayers: match.teamAPlayers?.length || 0,
@@ -1051,7 +1064,7 @@ export function persistCurrentMatch(overrides = {}) {
     logActivity(logAction || auditAction, "match", match.id, auditDetails);
   }
   persist();
-  window.dispatchEvent(new CustomEvent("match:local-persisted", { detail: { match } }));
+  window.dispatchEvent(new CustomEvent("match:local-persisted", { detail: { match, saveReason } }));
   return match;
 }
 
@@ -1163,6 +1176,37 @@ function applyDerivedStatsToPlayers(players = [], matches = [], source = "") {
   }));
   logDerivedStatsRecompute(source, matches, nextPlayers, statsByPlayerId);
   return nextPlayers;
+}
+
+function dedupeMatchesById(matches = []) {
+  const matchesById = new Map();
+  const duplicateIds = new Set();
+
+  matches.forEach((match) => {
+    if (!match?.id) return;
+    const existing = matchesById.get(match.id);
+    if (existing) duplicateIds.add(match.id);
+    matchesById.set(match.id, chooseNewestMatch(existing, match));
+  });
+
+  if (duplicateIds.size) {
+    console.warn(`[SquadCraft ${MATCH_DEBUG_VERSION}] duplicate match ids deduped`, {
+      duplicateIds: [...duplicateIds],
+      before: matches.length,
+      after: matchesById.size
+    });
+  }
+
+  return [...matchesById.values()];
+}
+
+function chooseNewestMatch(existing, candidate) {
+  if (!existing) return candidate;
+  return getMatchFreshness(candidate) >= getMatchFreshness(existing) ? candidate : existing;
+}
+
+function getMatchFreshness(match = {}) {
+  return new Date(match.updatedAt || match.updated_at || match.createdAt || match.created_at || match.dateTime || match.match_date || 0).getTime() || 0;
 }
 
 function logDerivedStatsRecompute(source, matches = [], players = [], statsByPlayerId = {}) {

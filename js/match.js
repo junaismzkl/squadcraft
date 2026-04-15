@@ -111,10 +111,15 @@ export function generateTeams(matchTime = "", reshuffle = false, options = {}) {
     }
 
     const previousMatchId = state.currentTeams?.id || "";
-    const isEditingSavedMatch = Boolean(state.currentTeams && !state.currentTeams.isDraft && state.currentTeams.status === "upcoming");
-    const existingMatchId = (reshuffle || isEditingSavedMatch) && state.currentTeams?.status === "upcoming"
+    const originalMatchId = String(options.originalMatchId || "").trim();
+    const editingSnapshot = options.editingMatchSnapshot || null;
+    const isEditingSavedMatch = Boolean(
+      originalMatchId
+      || (state.currentTeams && !state.currentTeams.isDraft && state.currentTeams.status === "upcoming")
+    );
+    const existingMatchId = originalMatchId || ((reshuffle || isEditingSavedMatch) && state.currentTeams?.status === "upcoming"
       ? state.currentTeams.id
-      : "";
+      : "");
     const currentUser = getCurrentUser();
     if (!currentUser) {
       return { ok: false, message: "Sign in before creating matches." };
@@ -123,13 +128,13 @@ export function generateTeams(matchTime = "", reshuffle = false, options = {}) {
       id: existingMatchId || `match-${Date.now()}`,
       status: "upcoming",
       isDraft: !isEditingSavedMatch,
-      createdBy: state.currentTeams?.createdBy || currentUser.id,
-      createdByName: state.currentTeams?.createdByName || currentUser.name,
-      createdAt: state.currentTeams?.createdAt || new Date().toISOString(),
+      createdBy: state.currentTeams?.createdBy || editingSnapshot?.createdBy || currentUser.id,
+      createdByName: state.currentTeams?.createdByName || editingSnapshot?.createdByName || currentUser.name,
+      createdAt: state.currentTeams?.createdAt || editingSnapshot?.createdAt || new Date().toISOString(),
       updatedBy: currentUser.id,
       updatedByName: currentUser.name,
       updatedAt: new Date().toISOString(),
-      editHistory: state.currentTeams?.editHistory || [],
+      editHistory: state.currentTeams?.editHistory || editingSnapshot?.editHistory || [],
       ...settings,
       ...generatedTeams,
       formationA: generatedTeams.formation,
@@ -145,6 +150,7 @@ export function generateTeams(matchTime = "", reshuffle = false, options = {}) {
 
     console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] generateTeams result`, {
       previousMatchId,
+      originalMatchId,
       existingMatchId,
       isEditingSavedMatch,
       reshuffle,

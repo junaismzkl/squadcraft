@@ -16,6 +16,7 @@ export async function init() {
     window.addEventListener("match:local-persisted", async (event) => {
       const match = event.detail?.match;
       console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] match:local-persisted received`, {
+        saveReason: event.detail?.saveReason || "",
         matchId: match?.id || "",
         location: match?.location || "",
         teamAPlayers: match?.teamAPlayers?.length || match?.teamA?.length || 0,
@@ -23,6 +24,7 @@ export async function init() {
       });
       const result = await syncMatchToSupabase(event.detail?.match);
       console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] syncMatchToSupabase result`, {
+        saveReason: event.detail?.saveReason || "",
         ok: result.ok,
         message: result.message || "",
         matchId: result.match?.id || match?.id || ""

@@ -25,6 +25,7 @@ export async function loadSharedMatchesIntoState() {
     setMatches([]);
     return { ok: true, matches: [] };
   }
+  const matchCountBeforeReload = state.data.matches.length;
 
   const { data: matchRows, error: matchError } = await supabase
     .from(MATCHES_TABLE)
@@ -42,6 +43,7 @@ export async function loadSharedMatchesIntoState() {
     : { ok: true, rows: [] };
 
   console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] loadSharedMatchesIntoState fetched`, {
+    matchCountBeforeReload,
     matchRows: (matchRows || []).length,
     matchPlayerRows: (playerRowsResult.rows || []).length,
     matchIds
@@ -66,6 +68,8 @@ export async function loadSharedMatchesIntoState() {
   ));
   setMatches(mergeRemoteMatchesWithLocalFallback(matches));
   console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] completed matches after shared reload`, {
+    matchCountBeforeReload,
+    matchCountAfterReload: state.data.matches.length,
     completedMatchesCount: state.data.matches.filter((match) => getMatchStatus(match) === "completed" && getMatchResult(match)).length,
     matches: state.data.matches.map((match) => ({
       matchId: match.id,
@@ -111,6 +115,7 @@ export async function saveSharedMatch(localMatch) {
   console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] public.matches saved`, {
     localMatchId: localMatch.id,
     remoteMatchId,
+    operation: isExistingRemoteMatch ? "update" : "insert",
     location: savedMatch.location || "",
     status: savedMatch.status || "",
     result: remoteMatchResultToLocal(savedMatch),
