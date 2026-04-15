@@ -68,6 +68,11 @@ export async function loadSharedMatchesIntoState() {
     profilesById
   ));
   setMatches(mergeRemoteMatchesWithLocalFallback(matches));
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] reloaded team player counts`, state.data.matches.map((match) => ({
+    matchId: match.id,
+    teamAPlayers: getPersistedTeamPlayers(match, "A").length,
+    teamBPlayers: getPersistedTeamPlayers(match, "B").length
+  })));
   console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] completed matches after shared reload`, {
     matchCountBeforeReload,
     matchCountAfterReload: state.data.matches.length,
@@ -93,11 +98,16 @@ export async function saveSharedMatch(localMatch) {
   }
 
   const isExistingRemoteMatch = isUuid(localMatch.id);
+  const originalMatchId = localMatch.originalEditingMatchId || localMatch.id || "";
+  const editorProfile = authState.currentProfile || {};
   console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] saveSharedMatch input`, {
+    originalMatchId,
     matchId: localMatch.id,
     isExistingRemoteMatch,
     createdBy: localMatch.createdBy || localMatch.created_by || "",
     signedInProfileId: authState.currentProfile?.id || "",
+    editorProfileId: editorProfile.id || "",
+    editorRole: editorProfile.role || "",
     location: localMatch.location || "",
     result: extractMatchResultPayload(localMatch),
     teamAPlayers: getPersistedTeamPlayers(localMatch, "A").length,
@@ -114,8 +124,11 @@ export async function saveSharedMatch(localMatch) {
 
   const remoteMatchId = savedMatch.id;
   console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] public.matches saved`, {
+    originalMatchId,
     localMatchId: localMatch.id,
     remoteMatchId,
+    matchIdBeforeSave: localMatch.id,
+    matchIdAfterSave: remoteMatchId,
     operation: isExistingRemoteMatch ? "update" : "insert",
     location: savedMatch.location || "",
     status: savedMatch.status || "",
@@ -125,18 +138,6 @@ export async function saveSharedMatch(localMatch) {
   if (remoteMatchId && remoteMatchId !== localMatch.id) {
     replaceLocalMatchId(localMatch.id, remoteMatchId);
     localMatch = { ...localMatch, id: remoteMatchId };
-  }
-
-  if (isExistingRemoteMatch) {
-    const { error: deleteError } = await supabase
-      .from(MATCH_PLAYERS_TABLE)
-      .delete()
-      .eq("match_id", remoteMatchId);
-
-    if (deleteError) {
-      console.warn("Could not replace shared match players in Supabase.", deleteError);
-      return { ok: false, message: deleteError.message };
-    }
   }
 
   const playerRows = localMatchPlayersToRemoteRows(localMatch, remoteMatchId);
@@ -150,6 +151,23 @@ export async function saveSharedMatch(localMatch) {
   if (!playerRows.length) {
     if (!isExistingRemoteMatch) await rollbackInsertedMatch(remoteMatchId);
     return { ok: false, message: "Cannot save match without team players." };
+  }
+
+  if (isExistingRemoteMatch) {
+    const { count: deletedMatchPlayerRows, error: deleteError } = await supabase
+      .from(MATCH_PLAYERS_TABLE)
+      .delete({ count: "exact" })
+      .eq("match_id", remoteMatchId);
+
+    if (deleteError) {
+      console.warn("Could not replace shared match players in Supabase.", deleteError);
+      return { ok: false, message: deleteError.message };
+    }
+
+    console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] public.match_players deleted for replacement`, {
+      matchId: remoteMatchId,
+      deletedRows: deletedMatchPlayerRows ?? 0
+    });
   }
 
   const { data: savedPlayerRows, error: playerError } = await supabase
@@ -367,7 +385,13 @@ function localMatchToRemoteMatch(match, options = {}) {
   if (!options.includeResultFields) return matchRow;
 
   const resultPayload = extractMatchResultPayload(match);
-  if (!resultPayload) return matchRow;
+  const auditPatch = metadata.updatedBy || metadata.updatedAt
+    ? {
+        updated_by: authState.currentProfile?.id || metadata.updatedBy || metadata.createdBy || null,
+        updated_at: metadata.updatedAt || new Date().toISOString()
+      }
+    : {};
+  if (!resultPayload) return { ...matchRow, ...auditPatch };
   console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] saved matchRow.result`, {
     matchId: match.id || "",
     result: resultPayload
@@ -375,9 +399,10 @@ function localMatchToRemoteMatch(match, options = {}) {
 
   return {
     ...matchRow,
+    ...auditPatch,
     result: resultPayload,
     updated_by: authState.currentProfile?.id || metadata.updatedBy || metadata.createdBy || null,
-    updated_at: new Date().toISOString()
+    updated_at: auditPatch.updated_at || new Date().toISOString()
   };
 }
 

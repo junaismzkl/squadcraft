@@ -2803,7 +2803,7 @@ function finishMatchEditing() {
     status: "upcoming",
     isDraft: false
   }));
-  persistCurrentMatch({
+  const savedMatch = persistCurrentMatch({
     forceSave: true,
     originalMatchId,
     status: "upcoming",
@@ -2811,7 +2811,7 @@ function finishMatchEditing() {
     auditAction: "match_edited",
     logAction: "match_edited"
   });
-  addMatchActionNotification(state.currentTeams, "match_edited");
+  addMatchActionNotification(savedMatch || state.currentTeams, "match_edited");
   editingMatchSnapshot = cloneMatchSnapshot(serializeCurrentMatch());
   originalEditingMatchId = "";
   hasPendingMatchEdits = false;
@@ -2916,11 +2916,19 @@ function addMatchActionNotification(match, type) {
     && now - new Date(notification.createdAt || 0).getTime() < 1000
   );
   if (recentDuplicate) return;
+  const actorId = getNotificationActorId(match, type);
+  const actorName = getNotificationActorName(match, type);
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] match action notification actor`, {
+    type,
+    matchId: match.id,
+    notificationActorId: actorId,
+    notificationActorResolvedName: actorName
+  });
   addNotification({
     id: `${type}-${match.id}-${now}`,
     matchId: match.id,
     type,
-    message: formatMatchActionMessage(match, type),
+    message: formatMatchActionMessage(match, type, actorName),
     read: false,
     createdAt: new Date(now).toISOString()
   });
@@ -2940,25 +2948,52 @@ function getNotificationDisplayContent(notification) {
   return { message, detail };
 }
 
-function formatMatchActionMessage(match, type) {
-  const actorName = getNotificationActorName(match, type);
+function formatMatchActionMessage(match, type, resolvedActorName = "") {
+  const actorName = resolvedActorName || getNotificationActorName(match, type);
   if (type === "match_created") return `Match created by ${actorName}`;
   if (type === "match_edited") return `Match edited by ${actorName}`;
   if (type === "result_added") return `Result added by ${actorName}`;
   return "Notification";
 }
 
+function getNotificationActorId(match, type) {
+  if (type === "match_created") {
+    return match.createdBy || authState.currentProfile?.id || authState.currentAuthUser?.id || "";
+  }
+  return match.updatedBy || authState.currentProfile?.id || authState.currentAuthUser?.id || match.createdBy || "";
+}
+
 function getNotificationActorName(match, type) {
   const currentUser = getCurrentUser();
+  const currentProfileName = resolveCurrentProfileActorName();
   if (type === "match_created") {
-    return match.createdByName || getUserName(match.createdBy) || currentUser?.name || "Unknown";
+    return firstKnownName(match.createdByName, getUserName(match.createdBy), currentProfileName, currentUser?.name) || "Unknown";
   }
-  return match.updatedByName
-    || getUserName(match.updatedBy)
-    || currentUser?.name
-    || match.createdByName
-    || getUserName(match.createdBy)
-    || "Unknown";
+  return firstKnownName(
+    match.updatedByName,
+    getUserName(match.updatedBy),
+    currentProfileName,
+    currentUser?.name,
+    match.createdByName,
+    getUserName(match.createdBy)
+  ) || "Unknown";
+}
+
+function resolveCurrentProfileActorName() {
+  return firstKnownName(
+    authState.currentProfile?.display_name,
+    authState.currentProfile?.name,
+    authState.currentAuthUser?.email
+  );
+}
+
+function firstKnownName(...values) {
+  return values.map(cleanActorName).find(Boolean) || "";
+}
+
+function cleanActorName(value) {
+  const name = String(value || "").trim();
+  return name && name.toLowerCase() !== "unknown" ? name : "";
 }
 
 function formatNotificationMatchTitle(match) {
