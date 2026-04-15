@@ -23,6 +23,8 @@ import {
 } from "./state.js?v=match-debug-v5";
 import { escapeHtml } from "./utils.js?v=match-debug-v5";
 
+const MATCH_DEBUG_VERSION = "match-debug-v5";
+
 export function renderMotmOptions(els) {
   els.motmSelect.innerHTML = "";
   getCurrentMatchPlayers().forEach((player) => {
@@ -236,6 +238,15 @@ export function saveMatchResult(event, els) {
     resultOpen: false,
     liveMotmId: result.manOfTheMatch
   }));
+
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] saveMatchResult payload`, {
+    matchId: state.currentTeams.id,
+    createdBy: state.currentTeams.createdBy || "",
+    signedInProfileId: state.data.authProfileId || state.data.currentUserId || "",
+    isUpdate: isUuid(state.currentTeams.id),
+    status: "completed",
+    result
+  });
 
   persistCurrentMatch({
     status: "completed",
@@ -532,6 +543,10 @@ function getCleanSheetIncrement(player, teamKey, result) {
   if (!isGoalkeeperPlayer(player)) return 0;
   const conceded = teamKey === "a" ? result.scoreB : result.scoreA;
   return conceded === 0 ? 1 : 0;
+}
+
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i.test(String(value || ""));
 }
 
 function addPendingResultNotification(match) {

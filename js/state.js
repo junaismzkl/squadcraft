@@ -104,6 +104,36 @@ export function createDefaultPlayerStats() {
   };
 }
 
+export function derivePlayerStatsFromMatches(matches = []) {
+  return [...(Array.isArray(matches) ? matches : [])].reduce((statsByPlayerId, match) => {
+    const normalizedMatch = normalizeMatchRecord(match);
+    const result = getMatchResult(normalizedMatch);
+    if (getMatchStatus(normalizedMatch) !== "completed" || !result) return statsByPlayerId;
+
+    const teamAPlayers = matchTeamPlayers(normalizedMatch, "a").filter((player) => !player.isGuest);
+    const teamBPlayers = matchTeamPlayers(normalizedMatch, "b").filter((player) => !player.isGuest);
+    const teamAIds = new Set(teamAPlayers.map((player) => player.id));
+    const teamBIds = new Set(teamBPlayers.map((player) => player.id));
+    const goalsByPlayer = countScorers([...(result.scorersA || []), ...(result.scorersB || [])]);
+    const outcome = getMatchOutcome(result.scoreA, result.scoreB);
+
+    [...teamAPlayers, ...teamBPlayers].forEach((player) => {
+      const playerStats = statsByPlayerId[player.id] || createDefaultPlayerStats();
+      const teamKey = teamAIds.has(player.id) ? "a" : teamBIds.has(player.id) ? "b" : "";
+      playerStats.matches += 1;
+      playerStats.wins += outcome === teamKey ? 1 : 0;
+      playerStats.draws += outcome === "draw" ? 1 : 0;
+      playerStats.losses += outcome !== "draw" && outcome !== teamKey ? 1 : 0;
+      playerStats.goals += goalsByPlayer[player.id] || 0;
+      playerStats.motm += player.id === result.manOfTheMatch ? 1 : 0;
+      playerStats.cleanSheets += getCleanSheetIncrement(player, teamKey, result);
+      statsByPlayerId[player.id] = playerStats;
+    });
+
+    return statsByPlayerId;
+  }, {});
+}
+
 export function normalizePositionCode(value) {
   const directValue = String(value || "").trim().toUpperCase();
   if (roles.includes(directValue)) return directValue;
@@ -158,7 +188,7 @@ export function setReady(isReady) {
 }
 
 export function setPlayers(players) {
-  const safePlayers = sanitizePermanentPlayers(players);
+  const safePlayers = applyDerivedStatsToPlayers(sanitizePermanentPlayers(players), state.data.matches);
   state.data = {
     ...state.data,
     players: safePlayers
@@ -192,9 +222,11 @@ export function updatePlayers(updater) {
 }
 
 export function setMatches(matches) {
+  const safeMatches = [...(Array.isArray(matches) ? matches : [])].map(normalizeMatchRecord);
   state.data = {
     ...state.data,
-    matches: [...(Array.isArray(matches) ? matches : [])].map(normalizeMatchRecord)
+    matches: safeMatches,
+    players: applyDerivedStatsToPlayers(state.data.players, safeMatches)
   };
   debugLog("state.matches updated", { count: state.data.matches.length });
 }
@@ -1111,6 +1143,28 @@ export function countScorers(scorers) {
     counts[entry.playerId] = (counts[entry.playerId] || 0) + (Number(entry.goals) || 0);
     return counts;
   }, {});
+}
+
+function applyDerivedStatsToPlayers(players = [], matches = []) {
+  const statsByPlayerId = derivePlayerStatsFromMatches(matches);
+  return [...(Array.isArray(players) ? players : [])].map((player) => ({
+    ...player,
+    stats: {
+      ...createDefaultPlayerStats(),
+      ...(statsByPlayerId[player.id] || {})
+    }
+  }));
+}
+
+function getMatchOutcome(scoreA, scoreB) {
+  if (Number(scoreA) === Number(scoreB)) return "draw";
+  return Number(scoreA) > Number(scoreB) ? "a" : "b";
+}
+
+function getCleanSheetIncrement(player, teamKey, result) {
+  if (!isGoalkeeperPlayer(player)) return 0;
+  const conceded = teamKey === "a" ? result.scoreB : result.scoreA;
+  return Number(conceded) === 0 ? 1 : 0;
 }
 
 export function motmName(match) {

@@ -68,7 +68,10 @@ export async function saveSharedMatch(localMatch) {
   console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] saveSharedMatch input`, {
     matchId: localMatch.id,
     isExistingRemoteMatch,
+    createdBy: localMatch.createdBy || localMatch.created_by || "",
+    signedInProfileId: authState.currentProfile?.id || "",
     location: localMatch.location || "",
+    result: extractMatchResultPayload(localMatch),
     teamAPlayers: getPersistedTeamPlayers(localMatch, "A").length,
     teamBPlayers: getPersistedTeamPlayers(localMatch, "B").length
   });
@@ -175,20 +178,34 @@ async function rollbackInsertedMatch(matchId) {
 }
 
 async function saveMatchRow(localMatch) {
-  const matchRow = localMatchToRemoteMatch(localMatch);
+  const matchRow = localMatchToRemoteMatch(localMatch, { includeResultFields: true });
+  const isUpsert = isUuid(localMatch.id);
   console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] public.matches save payload`, {
     matchId: localMatch.id,
-    isUpsert: isUuid(localMatch.id),
+    isUpsert,
+    createdBy: matchRow.created_by || "",
+    signedInProfileId: authState.currentProfile?.id || "",
     location: matchRow.location,
     locationType: typeof matchRow.location,
+    result: extractMatchResultPayload(localMatch),
     teamAPlayers: getPersistedTeamPlayers(localMatch, "A").length,
     teamBPlayers: getPersistedTeamPlayers(localMatch, "B").length,
     row: matchRow
   });
-  const query = isUuid(localMatch.id)
-    ? supabase.from(MATCHES_TABLE).upsert({ ...matchRow, id: localMatch.id }).select("*").single()
-    : supabase.from(MATCHES_TABLE).insert(matchRow).select("*").single();
-  return query;
+  const result = isUpsert
+    ? await supabase.from(MATCHES_TABLE).upsert({ ...matchRow, id: localMatch.id }).select("*").single()
+    : await supabase.from(MATCHES_TABLE).insert(matchRow).select("*").single();
+
+  if (!result.error || !isMissingMatchResultColumnError(result.error)) return result;
+
+  const fallbackRow = localMatchToRemoteMatch(localMatch, { includeResultFields: false });
+  console.warn(`[SquadCraft ${MATCH_DEBUG_VERSION}] public.matches result columns unavailable; retrying base match payload.`, {
+    error: result.error,
+    fallbackRow
+  });
+  return isUpsert
+    ? supabase.from(MATCHES_TABLE).upsert({ ...fallbackRow, id: localMatch.id }).select("*").single()
+    : supabase.from(MATCHES_TABLE).insert(fallbackRow).select("*").single();
 }
 
 export async function syncMatchToSupabase(localMatch) {
@@ -288,17 +305,45 @@ async function loadMatchAuditProfiles(matchRows) {
   return new Map((data || []).map((profile) => [profile.id, profile]));
 }
 
-function localMatchToRemoteMatch(match) {
+function localMatchToRemoteMatch(match, options = {}) {
   const now = new Date().toISOString();
   const metadata = normalizeMatchMetadata(match);
   const startTime = match.startTime || match.dateTime || now;
-  return {
+  const matchRow = {
     title: match.title || `${match.teamAName || "Team A"} vs ${match.teamBName || "Team B"}`,
     match_date: startTime,
     location: getPlainLocationText(match.location),
     status: match.status || "upcoming",
     created_by: metadata.createdBy || authState.currentProfile.id,
     created_at: metadata.createdAt || now
+  };
+
+  if (!options.includeResultFields) return matchRow;
+
+  const resultPayload = extractMatchResultPayload(match);
+  if (!resultPayload) return matchRow;
+
+  return {
+    ...matchRow,
+    result: resultPayload,
+    team_a_score: resultPayload.scoreA,
+    team_b_score: resultPayload.scoreB,
+    scorers_a: resultPayload.scorersA,
+    scorers_b: resultPayload.scorersB,
+    man_of_the_match: resultPayload.manOfTheMatch || null,
+    updated_by: authState.currentProfile?.id || metadata.updatedBy || metadata.createdBy || null,
+    updated_at: new Date().toISOString()
+  };
+}
+
+function extractMatchResultPayload(match) {
+  if (!match?.result) return null;
+  return {
+    scoreA: Number(match.result.scoreA) || 0,
+    scoreB: Number(match.result.scoreB) || 0,
+    scorersA: Array.isArray(match.result.scorersA) ? match.result.scorersA : [],
+    scorersB: Array.isArray(match.result.scorersB) ? match.result.scorersB : [],
+    manOfTheMatch: match.result.manOfTheMatch || ""
   };
 }
 
@@ -346,6 +391,7 @@ function remoteMatchToLocal(matchRow, playerRows, profilesById = new Map()) {
   const { teamAName, teamBName } = splitMatchTitle(matchRow.title);
   const locationData = parseStoredLocation(matchRow.location);
   const legacyMatchPayload = locationData.match || {};
+  const resultPayload = remoteMatchResultToLocal(matchRow, legacyMatchPayload);
   const startTime = matchRow.match_date || matchRow.created_at || new Date().toISOString();
   const endTime = locationData.endTime || matchRow.end_time || matchRow.endTime || addMinutesToDateTime(startTime, 60);
   const embeddedTeamA = snapshotTeam(getPersistedTeamPlayers(legacyMatchPayload, "A"));
@@ -395,10 +441,10 @@ function remoteMatchToLocal(matchRow, playerRows, profilesById = new Map()) {
     captainB: legacyMatchPayload.captainB || legacyMatchPayload.captainBId || "",
     managerName: legacyMatchPayload.managerName || "",
     managerTeam: legacyMatchPayload.managerTeam || "",
-    result: legacyMatchPayload.result || null,
-    scorersA: legacyMatchPayload.scorersA || legacyMatchPayload.result?.scorersA || [],
-    scorersB: legacyMatchPayload.scorersB || legacyMatchPayload.result?.scorersB || [],
-    liveMotmId: legacyMatchPayload.liveMotmId || legacyMatchPayload.result?.manOfTheMatch || "",
+    result: resultPayload,
+    scorersA: legacyMatchPayload.scorersA || resultPayload?.scorersA || [],
+    scorersB: legacyMatchPayload.scorersB || resultPayload?.scorersB || [],
+    liveMotmId: legacyMatchPayload.liveMotmId || resultPayload?.manOfTheMatch || "",
     lastGoal: legacyMatchPayload.lastGoal || null,
     createdBy: metadata.createdBy,
     createdByName: metadata.createdByName,
@@ -407,6 +453,31 @@ function remoteMatchToLocal(matchRow, playerRows, profilesById = new Map()) {
     updatedByName: metadata.updatedByName,
     updatedAt: matchRow.updated_at || "",
     editHistory: []
+  };
+}
+
+function remoteMatchResultToLocal(matchRow, legacyMatchPayload = {}) {
+  const rawResult = matchRow.result || legacyMatchPayload.result || null;
+  if (rawResult && typeof rawResult === "object") {
+    return {
+      scoreA: Number(rawResult.scoreA ?? rawResult.score_a ?? rawResult.teamAScore ?? rawResult.team_a_score) || 0,
+      scoreB: Number(rawResult.scoreB ?? rawResult.score_b ?? rawResult.teamBScore ?? rawResult.team_b_score) || 0,
+      scorersA: Array.isArray(rawResult.scorersA) ? rawResult.scorersA : Array.isArray(rawResult.scorers_a) ? rawResult.scorers_a : [],
+      scorersB: Array.isArray(rawResult.scorersB) ? rawResult.scorersB : Array.isArray(rawResult.scorers_b) ? rawResult.scorers_b : [],
+      manOfTheMatch: rawResult.manOfTheMatch || rawResult.man_of_the_match || ""
+    };
+  }
+
+  const hasScore = Number.isFinite(Number(matchRow.team_a_score ?? matchRow.teamAScore))
+    || Number.isFinite(Number(matchRow.team_b_score ?? matchRow.teamBScore));
+  if (!hasScore) return null;
+
+  return {
+    scoreA: Number(matchRow.team_a_score ?? matchRow.teamAScore) || 0,
+    scoreB: Number(matchRow.team_b_score ?? matchRow.teamBScore) || 0,
+    scorersA: Array.isArray(matchRow.scorers_a) ? matchRow.scorers_a : Array.isArray(matchRow.scorersA) ? matchRow.scorersA : [],
+    scorersB: Array.isArray(matchRow.scorers_b) ? matchRow.scorers_b : Array.isArray(matchRow.scorersB) ? matchRow.scorersB : [],
+    manOfTheMatch: matchRow.man_of_the_match || matchRow.manOfTheMatch || ""
   };
 }
 
@@ -582,4 +653,19 @@ function isUuid(value) {
 function isMissingProfileDisplayNameError(error) {
   const message = String(error?.message || "").toLowerCase();
   return message.includes("display_name") && (message.includes("schema cache") || message.includes("column"));
+}
+
+function isMissingMatchResultColumnError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return (message.includes("schema cache") || message.includes("column"))
+    && (
+      message.includes("result")
+      || message.includes("team_a_score")
+      || message.includes("team_b_score")
+      || message.includes("scorers_a")
+      || message.includes("scorers_b")
+      || message.includes("man_of_the_match")
+      || message.includes("updated_by")
+      || message.includes("updated_at")
+    );
 }
