@@ -1491,6 +1491,7 @@ export function createMatchAndReturnHome() {
     els.teamBalanceNote.textContent = "Could not create match. Please try again.";
     return;
   }
+  addMatchActionNotification(savedMatch, "match_created", "Match created");
   homeFeedbackMessage = "Match Created Successfully";
   resetMatchSetupState();
   switchTab("home");
@@ -2130,9 +2131,16 @@ function saveCurrentLineup(match) {
   }
 
   html2canvas(pitch).then((canvas) => {
+    const jpegCanvas = document.createElement("canvas");
+    jpegCanvas.width = canvas.width;
+    jpegCanvas.height = canvas.height;
+    const context = jpegCanvas.getContext("2d");
+    context.fillStyle = "#0f1720";
+    context.fillRect(0, 0, jpegCanvas.width, jpegCanvas.height);
+    context.drawImage(canvas, 0, 0);
     const link = document.createElement("a");
-    link.download = "lineup.png";
-    link.href = canvas.toDataURL("image/png");
+    link.download = "lineup.jpg";
+    link.href = jpegCanvas.toDataURL("image/jpeg", 0.92);
     link.click();
     alert("Lineup saved successfully");
   }).catch((error) => {
@@ -2718,6 +2726,7 @@ function finishMatchEditing() {
     auditAction: "match_edited",
     logAction: "match_edited"
   });
+  addMatchActionNotification(state.currentTeams, "match_edited", "Match edited");
   editingMatchSnapshot = cloneMatchSnapshot(serializeCurrentMatch());
   originalEditingMatchId = "";
   hasPendingMatchEdits = false;
@@ -2813,6 +2822,26 @@ function addPendingResultNotificationIfMissing(match) {
   });
 }
 
+function addMatchActionNotification(match, type, message) {
+  if (!match?.id) return;
+  const now = Date.now();
+  const recentDuplicate = getNotifications().some((notification) =>
+    notification.type === type
+    && notification.matchId === match.id
+    && now - new Date(notification.createdAt || 0).getTime() < 1000
+  );
+  if (recentDuplicate) return;
+  addNotification({
+    id: `${type}-${match.id}-${now}`,
+    matchId: match.id,
+    type,
+    message,
+    read: false,
+    createdAt: new Date(now).toISOString()
+  });
+  persist();
+}
+
 function handleNotificationOpen(notification) {
   if (notification.type === "player_approval_pending") {
     updateNotificationRead(notification.id);
@@ -2847,6 +2876,8 @@ function updateNotificationRead(notificationId) {
 function formatNotificationType(type) {
   if (type === "pending_result") return "Pending";
   if (type === "result_added") return "Saved";
+  if (type === "match_created") return "Created";
+  if (type === "match_edited") return "Edited";
   if (type === "player_approval_pending") return "Approval";
   return "Info";
 }
