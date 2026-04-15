@@ -5,6 +5,7 @@ import {
   getMatchStatus,
   normalizeMatchMetadata,
   normalizePlayerRecord,
+  normalizeScorerEntries,
   setMatches,
   snapshotTeam,
   state,
@@ -367,6 +368,10 @@ function localMatchToRemoteMatch(match, options = {}) {
 
   const resultPayload = extractMatchResultPayload(match);
   if (!resultPayload) return matchRow;
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] saved matchRow.result`, {
+    matchId: match.id || "",
+    result: resultPayload
+  });
 
   return {
     ...matchRow,
@@ -381,8 +386,8 @@ function extractMatchResultPayload(match) {
   return {
     scoreA: Number(match.result.scoreA) || 0,
     scoreB: Number(match.result.scoreB) || 0,
-    scorersA: Array.isArray(match.result.scorersA) ? match.result.scorersA : [],
-    scorersB: Array.isArray(match.result.scorersB) ? match.result.scorersB : [],
+    scorersA: normalizeScorerEntries(match.result.scorersA),
+    scorersB: normalizeScorerEntries(match.result.scorersB),
     manOfTheMatch: match.result.manOfTheMatch || ""
   };
 }
@@ -414,7 +419,7 @@ function getPersistedTeamPlayers(match, team) {
 function appendTeamRows(rows, players, matchId, team, auditFields = {}) {
   players.forEach((player) => {
     const isGuest = Boolean(player.isGuest);
-    const profileId = isGuest ? null : (player.profileId || player.profile_id || player.ownerUserId || authState.currentProfile?.id || player.id || null);
+    const profileId = isGuest ? null : (player.profileId || player.profile_id || player.id || player.ownerUserId || null);
     rows.push({
       match_id: matchId,
       profile_id: profileId,
@@ -431,19 +436,24 @@ function remoteMatchToLocal(matchRow, playerRows, profilesById = new Map()) {
   const { teamAName, teamBName } = splitMatchTitle(matchRow.title);
   const locationData = parseStoredLocation(matchRow.location);
   const legacyMatchPayload = locationData.match || {};
-  const resultPayload = remoteMatchResultToLocal(matchRow, legacyMatchPayload);
+  const rawResultPayload = remoteMatchResultToLocal(matchRow, legacyMatchPayload);
   const startTime = matchRow.match_date || matchRow.created_at || new Date().toISOString();
   const endTime = locationData.endTime || matchRow.end_time || matchRow.endTime || addMinutesToDateTime(startTime, 60);
   const embeddedTeamA = snapshotTeam(getPersistedTeamPlayers(legacyMatchPayload, "A"));
   const embeddedTeamB = snapshotTeam(getPersistedTeamPlayers(legacyMatchPayload, "B"));
   const teamAPlayers = remoteTeamPlayersToLocal(playerRows, "A", embeddedTeamA);
   const teamBPlayers = remoteTeamPlayersToLocal(playerRows, "B", embeddedTeamB);
+  const resultPayload = normalizeResultPlayerIds(rawResultPayload, [...teamAPlayers, ...teamBPlayers]);
   console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] remoteMatchToLocal`, {
     matchId: matchRow.id,
     rawLocation: matchRow.location,
     parsedLocation: locationData.location,
     status: matchRow.status || "",
+    rawResult: matchRow.result || null,
     reconstructedResult: resultPayload,
+    teamAPlayerIds: teamAPlayers.map(getPlayerDebugId),
+    teamBPlayerIds: teamBPlayers.map(getPlayerDebugId),
+    resultResolution: getResultResolutionDebug(resultPayload, [...teamAPlayers, ...teamBPlayers]),
     playerRows: playerRows.length,
     teamAPlayers: teamAPlayers.length,
     teamBPlayers: teamBPlayers.length,
@@ -499,13 +509,13 @@ function remoteMatchToLocal(matchRow, playerRows, profilesById = new Map()) {
 }
 
 function remoteMatchResultToLocal(matchRow, legacyMatchPayload = {}) {
-  const rawResult = matchRow.result || legacyMatchPayload.result || null;
+  const rawResult = parseRemoteResultValue(matchRow.result) || parseRemoteResultValue(legacyMatchPayload.result) || null;
   if (rawResult && typeof rawResult === "object") {
     return {
       scoreA: Number(rawResult.scoreA ?? rawResult.score_a ?? rawResult.teamAScore ?? rawResult.team_a_score) || 0,
       scoreB: Number(rawResult.scoreB ?? rawResult.score_b ?? rawResult.teamBScore ?? rawResult.team_b_score) || 0,
-      scorersA: Array.isArray(rawResult.scorersA) ? rawResult.scorersA : Array.isArray(rawResult.scorers_a) ? rawResult.scorers_a : [],
-      scorersB: Array.isArray(rawResult.scorersB) ? rawResult.scorersB : Array.isArray(rawResult.scorers_b) ? rawResult.scorers_b : [],
+      scorersA: normalizeScorerEntries(Array.isArray(rawResult.scorersA) ? rawResult.scorersA : Array.isArray(rawResult.scorers_a) ? rawResult.scorers_a : []),
+      scorersB: normalizeScorerEntries(Array.isArray(rawResult.scorersB) ? rawResult.scorersB : Array.isArray(rawResult.scorers_b) ? rawResult.scorers_b : []),
       manOfTheMatch: rawResult.manOfTheMatch || rawResult.man_of_the_match || ""
     };
   }
@@ -517,10 +527,21 @@ function remoteMatchResultToLocal(matchRow, legacyMatchPayload = {}) {
   return {
     scoreA: Number(matchRow.team_a_score ?? matchRow.teamAScore) || 0,
     scoreB: Number(matchRow.team_b_score ?? matchRow.teamBScore) || 0,
-    scorersA: Array.isArray(matchRow.scorers_a) ? matchRow.scorers_a : Array.isArray(matchRow.scorersA) ? matchRow.scorersA : [],
-    scorersB: Array.isArray(matchRow.scorers_b) ? matchRow.scorers_b : Array.isArray(matchRow.scorersB) ? matchRow.scorersB : [],
+    scorersA: normalizeScorerEntries(Array.isArray(matchRow.scorers_a) ? matchRow.scorers_a : Array.isArray(matchRow.scorersA) ? matchRow.scorersA : []),
+    scorersB: normalizeScorerEntries(Array.isArray(matchRow.scorers_b) ? matchRow.scorers_b : Array.isArray(matchRow.scorersB) ? matchRow.scorersB : []),
     manOfTheMatch: matchRow.man_of_the_match || matchRow.manOfTheMatch || ""
   };
+}
+
+function parseRemoteResultValue(value) {
+  if (!value) return null;
+  if (typeof value === "object") return value;
+  try {
+    const parsed = JSON.parse(String(value));
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function remoteTeamPlayersToLocal(playerRows, team, embeddedTeam) {
@@ -554,6 +575,69 @@ function remoteTeamPlayersToLocal(playerRows, team, embeddedTeam) {
     }
     return player;
   });
+}
+
+function normalizeResultPlayerIds(result, players = []) {
+  if (!result) return null;
+  const idMap = buildPlayerIdMap(players);
+  return {
+    ...result,
+    scorersA: normalizeResultScorerIds(result.scorersA, idMap),
+    scorersB: normalizeResultScorerIds(result.scorersB, idMap),
+    manOfTheMatch: idMap.get(String(result.manOfTheMatch || "").trim()) || result.manOfTheMatch || ""
+  };
+}
+
+function normalizeResultScorerIds(scorers = [], idMap = new Map()) {
+  return normalizeScorerEntries(scorers).map((entry) => {
+    const playerId = String(entry.playerId || "").trim();
+    return {
+      ...entry,
+      playerId: idMap.get(playerId) || playerId
+    };
+  });
+}
+
+function buildPlayerIdMap(players = []) {
+  const idMap = new Map();
+  players.forEach((player) => {
+    const canonicalId = String(player?.id || "").trim();
+    if (!canonicalId) return;
+    getPlayerIdAliases(player).forEach((alias) => {
+      if (alias && !idMap.has(alias)) idMap.set(alias, canonicalId);
+    });
+  });
+  return idMap;
+}
+
+function getPlayerIdAliases(player = {}) {
+  return [
+    player.id,
+    player.profileId,
+    player.profile_id,
+    player.ownerUserId
+  ].map((value) => String(value || "").trim()).filter(Boolean);
+}
+
+function getPlayerDebugId(player = {}) {
+  return {
+    id: player.id || "",
+    profileId: player.profileId || "",
+    ownerUserId: player.ownerUserId || "",
+    name: player.name || "",
+    isGuest: Boolean(player.isGuest)
+  };
+}
+
+function getResultResolutionDebug(result, players = []) {
+  const playerIds = new Set(players.map((player) => player.id));
+  const scorerIds = [...(result?.scorersA || []), ...(result?.scorersB || [])].map((entry) => entry.playerId);
+  return {
+    scorerIds,
+    motmId: result?.manOfTheMatch || "",
+    unresolvedScorerIds: scorerIds.filter((playerId) => playerId && playerId !== "OWN_GOAL" && !playerIds.has(playerId)),
+    motmResolved: !result?.manOfTheMatch || playerIds.has(result.manOfTheMatch)
+  };
 }
 
 function mergeRemoteMatchesWithLocalFallback(remoteMatches) {

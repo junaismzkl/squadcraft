@@ -1173,7 +1173,12 @@ export function scorersText(match) {
   const counts = countScorers([...(result?.scorersA || []), ...(result?.scorersB || [])]);
   const scorers = Object.entries(counts).map(([playerId, goals]) => {
     if (playerId === OWN_GOAL_ID) return `Own Goal (${goals})`;
-    const player = allPlayers.find((item) => item.id === playerId);
+    const player = findMatchPlayerById(allPlayers, playerId);
+    console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] scorer id resolved`, {
+      playerId,
+      resolved: Boolean(player),
+      playerName: player?.name || ""
+    });
     return `${escapeHtml(player?.name || "Unknown")} (${goals})`;
   });
 
@@ -1343,7 +1348,28 @@ export function motmName(match) {
   const result = getMatchResult(match);
   const motmId = result?.manOfTheMatch || match.motmId || "";
   const allPlayers = [...matchTeamPlayers(match, "a"), ...matchTeamPlayers(match, "b")];
-  return allPlayers.find((player) => player.id === motmId)?.name || match.motmName || "";
+  const player = findMatchPlayerById(allPlayers, motmId);
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] motm id resolved`, {
+    motmId,
+    resolved: Boolean(player),
+    playerName: player?.name || ""
+  });
+  return player?.name || match.motmName || "";
+}
+
+function findMatchPlayerById(players = [], playerId = "") {
+  const targetId = String(playerId || "").trim();
+  if (!targetId) return null;
+  return players.find((player) => getPlayerIdAliases(player).includes(targetId)) || null;
+}
+
+function getPlayerIdAliases(player = {}) {
+  return [
+    player.id,
+    player.profileId,
+    player.profile_id,
+    player.ownerUserId
+  ].map((value) => String(value || "").trim()).filter(Boolean);
 }
 
 export function managerHistoryTeam(match, teamAName, teamBName) {
