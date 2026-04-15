@@ -1,10 +1,24 @@
 import { authState } from "./auth.js?v=match-debug-v5";
 import { supabase } from "./supabaseClient.js?v=match-debug-v5";
-import { normalizeMatchMetadata, normalizePlayerRecord, setMatches, snapshotTeam, state, updateTeams } from "./state.js?v=match-debug-v5";
+import {
+  getMatchResult,
+  getMatchStatus,
+  normalizeMatchMetadata,
+  normalizePlayerRecord,
+  setMatches,
+  snapshotTeam,
+  state,
+  updateTeams
+} from "./state.js?v=match-debug-v5";
 
 const MATCHES_TABLE = "matches";
 const MATCH_PLAYERS_TABLE = "match_players";
 const MATCH_DEBUG_VERSION = "match-debug-v5";
+const MATCH_RESULT_COLUMNS_MIGRATION = `
+alter table public.matches add column if not exists result jsonb;
+alter table public.matches add column if not exists updated_by uuid null;
+alter table public.matches add column if not exists updated_at timestamptz null;
+`;
 
 export async function loadSharedMatchesIntoState() {
   if (!authState.isAuthenticated) {
@@ -51,6 +65,15 @@ export async function loadSharedMatchesIntoState() {
     profilesById
   ));
   setMatches(mergeRemoteMatchesWithLocalFallback(matches));
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] completed matches after shared reload`, {
+    completedMatchesCount: state.data.matches.filter((match) => getMatchStatus(match) === "completed" && getMatchResult(match)).length,
+    matches: state.data.matches.map((match) => ({
+      matchId: match.id,
+      status: getMatchStatus(match),
+      hasResult: Boolean(getMatchResult(match)),
+      result: getMatchResult(match)
+    }))
+  });
   return { ok: true, matches: state.data.matches };
 }
 
@@ -77,9 +100,9 @@ export async function saveSharedMatch(localMatch) {
   });
   const { data: savedMatch, error: matchError } = await saveMatchRow(localMatch);
   if (matchError) {
-    console.error("Could not insert shared match into Supabase.", {
+    console.error("Could not save shared match into Supabase.", {
       error: matchError,
-      row: localMatchToRemoteMatch(localMatch)
+      row: localMatchToRemoteMatch(localMatch, { includeResultFields: true })
     });
     return { ok: false, message: matchError.message };
   }
@@ -89,7 +112,9 @@ export async function saveSharedMatch(localMatch) {
     localMatchId: localMatch.id,
     remoteMatchId,
     location: savedMatch.location || "",
-    status: savedMatch.status || ""
+    status: savedMatch.status || "",
+    result: remoteMatchResultToLocal(savedMatch),
+    row: savedMatch
   });
   if (remoteMatchId && remoteMatchId !== localMatch.id) {
     replaceLocalMatchId(localMatch.id, remoteMatchId);
@@ -192,11 +217,26 @@ async function saveMatchRow(localMatch) {
     teamBPlayers: getPersistedTeamPlayers(localMatch, "B").length,
     row: matchRow
   });
+  if (extractMatchResultPayload(localMatch)) {
+    console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] completed result remote payload`, {
+      matchId: localMatch.id,
+      operation: isUpsert ? "update" : "insert",
+      payload: matchRow
+    });
+  }
   const result = isUpsert
-    ? await supabase.from(MATCHES_TABLE).upsert({ ...matchRow, id: localMatch.id }).select("*").single()
+    ? await supabase.from(MATCHES_TABLE).update(matchRow).eq("id", localMatch.id).select("*").single()
     : await supabase.from(MATCHES_TABLE).insert(matchRow).select("*").single();
 
   if (!result.error || !isMissingMatchResultColumnError(result.error)) return result;
+
+  if (extractMatchResultPayload(localMatch)) {
+    console.error(`[SquadCraft ${MATCH_DEBUG_VERSION}] completed result could not be persisted because public.matches is missing result/audit columns.`, {
+      error: result.error,
+      requiredMigration: MATCH_RESULT_COLUMNS_MIGRATION
+    });
+    return result;
+  }
 
   const fallbackRow = localMatchToRemoteMatch(localMatch, { includeResultFields: false });
   console.warn(`[SquadCraft ${MATCH_DEBUG_VERSION}] public.matches result columns unavailable; retrying base match payload.`, {
@@ -204,7 +244,7 @@ async function saveMatchRow(localMatch) {
     fallbackRow
   });
   return isUpsert
-    ? supabase.from(MATCHES_TABLE).upsert({ ...fallbackRow, id: localMatch.id }).select("*").single()
+    ? supabase.from(MATCHES_TABLE).update(fallbackRow).eq("id", localMatch.id).select("*").single()
     : supabase.from(MATCHES_TABLE).insert(fallbackRow).select("*").single();
 }
 
@@ -326,11 +366,6 @@ function localMatchToRemoteMatch(match, options = {}) {
   return {
     ...matchRow,
     result: resultPayload,
-    team_a_score: resultPayload.scoreA,
-    team_b_score: resultPayload.scoreB,
-    scorers_a: resultPayload.scorersA,
-    scorers_b: resultPayload.scorersB,
-    man_of_the_match: resultPayload.manOfTheMatch || null,
     updated_by: authState.currentProfile?.id || metadata.updatedBy || metadata.createdBy || null,
     updated_at: new Date().toISOString()
   };
@@ -402,6 +437,8 @@ function remoteMatchToLocal(matchRow, playerRows, profilesById = new Map()) {
     matchId: matchRow.id,
     rawLocation: matchRow.location,
     parsedLocation: locationData.location,
+    status: matchRow.status || "",
+    reconstructedResult: resultPayload,
     playerRows: playerRows.length,
     teamAPlayers: teamAPlayers.length,
     teamBPlayers: teamBPlayers.length,
