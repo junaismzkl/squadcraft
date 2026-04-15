@@ -93,7 +93,7 @@ export function renderScorerRows(els, teamKey) {
       <select aria-label="${teamKey === "a" ? "Team A" : "Team B"} scorer ${index + 1}">
         <option value="">Select scorer</option>
         <option value="${OWN_GOAL_ID}" ${entry.playerId === OWN_GOAL_ID ? "selected" : ""}>Own Goal</option>
-        ${teamPlayers(teamKey)
+        ${scorerOptionPlayers(teamKey)
           .map((player) => `<option value="${player.id}" ${player.id === entry.playerId ? "selected" : ""}>${escapeHtml(player.name)}</option>`)
           .join("")}
       </select>
@@ -169,6 +169,17 @@ export function addScorerRow(els, teamKey) {
 export function teamPlayers(teamKey) {
   if (!state.currentTeams) return [];
   return teamKey === "a" ? state.currentTeams.teamA : state.currentTeams.teamB;
+}
+
+function scorerOptionPlayers(teamKey) {
+  const team = teamKey === "a" ? state.currentTeams?.teamA : state.currentTeams?.teamB;
+  const seenPlayerIds = new Set();
+  return [...(Array.isArray(team) ? team : [])].filter((player) => {
+    const playerId = String(player?.id || "").trim();
+    if (!playerId || playerId === OWN_GOAL_ID || seenPlayerIds.has(playerId)) return false;
+    seenPlayerIds.add(playerId);
+    return true;
+  });
 }
 
 export function selectedScorers(teamKey) {
