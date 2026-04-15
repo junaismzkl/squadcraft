@@ -419,17 +419,51 @@ function getPersistedTeamPlayers(match, team) {
 function appendTeamRows(rows, players, matchId, team, auditFields = {}) {
   players.forEach((player) => {
     const isGuest = Boolean(player.isGuest);
-    const profileId = isGuest ? null : (player.profileId || player.profile_id || player.id || player.ownerUserId || null);
-    rows.push({
+    const profileId = isGuest ? null : getRegisteredProfileId(player);
+    if (!isGuest && !profileId) {
+      console.error(`[SquadCraft ${MATCH_DEBUG_VERSION}] skipping match_players row without a real profile UUID`, {
+        playerName: player?.name || "",
+        isGuestSourceValue: player?.isGuest,
+        team,
+        playerId: player?.id || "",
+        profileId: player?.profileId || player?.profile_id || "",
+        ownerUserId: player?.ownerUserId || ""
+      });
+      return;
+    }
+    const row = {
       match_id: matchId,
       profile_id: profileId,
       guest_name: isGuest ? player.name || "Guest" : null,
+      is_guest: isGuest,
       guest_position: isGuest ? getPlayerRoleLabel(player) : null,
       team,
       created_by: auditFields.created_by || authState.currentProfile?.id || null,
       created_at: auditFields.created_at || new Date().toISOString()
+    };
+    console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] match_players outgoing row`, {
+      playerName: player?.name || "",
+      isGuestSourceValue: player?.isGuest,
+      outgoingIsGuest: row.is_guest,
+      profile_id: row.profile_id,
+      guest_name: row.guest_name,
+      team: row.team
     });
+    rows.push(row);
   });
+}
+
+function getRegisteredProfileId(player = {}) {
+  return [
+    player.profileId,
+    player.profile_id,
+    player.id,
+    player.ownerUserId
+  ].map((value) => String(value || "").trim()).find(isValidUuid) || null;
+}
+
+function isValidUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
 }
 
 function remoteMatchToLocal(matchRow, playerRows, profilesById = new Map()) {
