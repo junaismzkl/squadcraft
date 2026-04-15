@@ -108,7 +108,10 @@ export function generateTeams(matchTime = "", reshuffle = false, options = {}) {
       };
     }
 
-    const existingMatchId = reshuffle && state.currentTeams?.status === "upcoming" ? state.currentTeams.id : "";
+    const isEditingSavedMatch = Boolean(state.currentTeams && !state.currentTeams.isDraft && state.currentTeams.status === "upcoming");
+    const existingMatchId = (reshuffle || isEditingSavedMatch) && state.currentTeams?.status === "upcoming"
+      ? state.currentTeams.id
+      : "";
     const currentUser = getCurrentUser();
     if (!currentUser) {
       return { ok: false, message: "Sign in before creating matches." };
@@ -116,7 +119,7 @@ export function generateTeams(matchTime = "", reshuffle = false, options = {}) {
     setTeams({
       id: existingMatchId || `match-${Date.now()}`,
       status: "upcoming",
-      isDraft: true,
+      isDraft: !isEditingSavedMatch,
       createdBy: state.currentTeams?.createdBy || currentUser.id,
       createdByName: state.currentTeams?.createdByName || currentUser.name,
       createdAt: state.currentTeams?.createdAt || new Date().toISOString(),

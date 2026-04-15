@@ -1121,6 +1121,7 @@ export function snapshotTeam(players) {
     const positions = normalizePlayerPositions(player);
     return {
       id: player.id,
+      profileId: player.profileId || player.profile_id || "",
       name: player.name,
       rating: normalizeStoredRating(player.rating),
       role: positions.primary,
@@ -1129,6 +1130,7 @@ export function snapshotTeam(players) {
       image: player.image || "",
       isGuest: player.isGuest,
       ownerUserId: player.ownerUserId || "",
+      profileBacked: Boolean(player.profileBacked),
       approvalStatus: player.approvalStatus || "approved",
       assignedPosition: normalizePositionCode(player.assignedPosition),
       assignedSlotIndex: player.assignedSlotIndex !== null && player.assignedSlotIndex !== undefined && player.assignedSlotIndex !== ""

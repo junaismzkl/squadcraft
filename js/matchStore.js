@@ -1,6 +1,6 @@
 import { authState } from "./auth.js";
 import { supabase } from "./supabaseClient.js";
-import { normalizeMatchMetadata, normalizePlayerRecord, setMatches, state, updateTeams } from "./state.js";
+import { normalizeMatchMetadata, normalizePlayerRecord, setMatches, snapshotTeam, state, updateTeams } from "./state.js";
 
 const MATCHES_TABLE = "matches";
 const MATCH_PLAYERS_TABLE = "match_players";
@@ -151,7 +151,7 @@ export async function deleteSharedMatch(matchId) {
 async function loadMatchPlayerRows(matchIds) {
   const nestedResult = await supabase
     .from(MATCH_PLAYERS_TABLE)
-    .select("*, profiles:profile_id(id, name, avatar_url, role)")
+    .select("*, profiles:profile_id(id, name, display_name, avatar_url, role, rating, primary_position, secondary_position, third_position)")
     .in("match_id", matchIds);
 
   if (!nestedResult.error) return { ok: true, rows: nestedResult.data || [] };
@@ -210,7 +210,7 @@ function localMatchToRemoteMatch(match) {
   return {
     title: match.title || `${match.teamAName || "Team A"} vs ${match.teamBName || "Team B"}`,
     match_date: startTime,
-    location: encodeMatchLocation(match.location || "", { endTime }),
+    location: encodeMatchLocation(match.location || "", { endTime, match }),
     status: match.status || "upcoming",
     created_by: metadata.createdBy || authState.currentProfile.id,
     created_at: metadata.createdAt || now
@@ -219,9 +219,15 @@ function localMatchToRemoteMatch(match) {
 
 function localMatchPlayersToRemoteRows(match, matchId) {
   const rows = [];
-  appendTeamRows(rows, match.teamAPlayers || match.teamA || [], matchId, "A");
-  appendTeamRows(rows, match.teamBPlayers || match.teamB || [], matchId, "B");
+  appendTeamRows(rows, getPersistedTeamPlayers(match, "A"), matchId, "A");
+  appendTeamRows(rows, getPersistedTeamPlayers(match, "B"), matchId, "B");
   return rows;
+}
+
+function getPersistedTeamPlayers(match, team) {
+  const primary = team === "A" ? match.teamAPlayers : match.teamBPlayers;
+  const fallback = team === "A" ? match.teamA : match.teamB;
+  return Array.isArray(primary) && primary.length ? primary : Array.isArray(fallback) ? fallback : [];
 }
 
 function appendTeamRows(rows, players, matchId, team) {
@@ -241,10 +247,13 @@ function appendTeamRows(rows, players, matchId, team) {
 function remoteMatchToLocal(matchRow, playerRows, profilesById = new Map()) {
   const { teamAName, teamBName } = splitMatchTitle(matchRow.title);
   const locationData = decodeMatchLocation(matchRow.location);
+  const embeddedMatch = locationData.match || {};
   const startTime = matchRow.match_date || matchRow.created_at || new Date().toISOString();
   const endTime = locationData.endTime || matchRow.end_time || matchRow.endTime || addMinutesToDateTime(startTime, 60);
-  const teamAPlayers = playerRows.filter((row) => String(row.team || "").toUpperCase() === "A").map(remoteMatchPlayerToLocal);
-  const teamBPlayers = playerRows.filter((row) => String(row.team || "").toUpperCase() === "B").map(remoteMatchPlayerToLocal);
+  const embeddedTeamA = snapshotTeam(getPersistedTeamPlayers(embeddedMatch, "A"));
+  const embeddedTeamB = snapshotTeam(getPersistedTeamPlayers(embeddedMatch, "B"));
+  const teamAPlayers = remoteTeamPlayersToLocal(playerRows, "A", embeddedTeamA);
+  const teamBPlayers = remoteTeamPlayersToLocal(playerRows, "B", embeddedTeamB);
   const createdBy = matchRow.created_by || matchRow.createdBy || "";
   const updatedBy = matchRow.updated_by || matchRow.updatedBy || matchRow.edited_by || matchRow.editedBy || "";
   const createdByProfile = profilesById.get(createdBy);
@@ -267,13 +276,22 @@ function remoteMatchToLocal(matchRow, playerRows, profilesById = new Map()) {
     status: matchRow.status || "upcoming",
     teamAName,
     teamBName,
-    formation: "0-0-0",
-    formationA: "0-0-0",
-    formationB: "0-0-0",
+    formation: embeddedMatch.formation || embeddedMatch.formationA || "0-0-0",
+    formationA: embeddedMatch.formationA || embeddedMatch.formation || "0-0-0",
+    formationB: embeddedMatch.formationB || embeddedMatch.formation || "0-0-0",
     teamAPlayers,
     teamBPlayers,
     teamA: teamAPlayers,
     teamB: teamBPlayers,
+    captainA: embeddedMatch.captainA || embeddedMatch.captainAId || "",
+    captainB: embeddedMatch.captainB || embeddedMatch.captainBId || "",
+    managerName: embeddedMatch.managerName || "",
+    managerTeam: embeddedMatch.managerTeam || "",
+    result: embeddedMatch.result || null,
+    scorersA: embeddedMatch.scorersA || embeddedMatch.result?.scorersA || [],
+    scorersB: embeddedMatch.scorersB || embeddedMatch.result?.scorersB || [],
+    liveMotmId: embeddedMatch.liveMotmId || embeddedMatch.result?.manOfTheMatch || "",
+    lastGoal: embeddedMatch.lastGoal || null,
     createdBy: metadata.createdBy,
     createdByName: metadata.createdByName,
     createdAt: matchRow.created_at || matchRow.match_date || new Date().toISOString(),
@@ -282,6 +300,39 @@ function remoteMatchToLocal(matchRow, playerRows, profilesById = new Map()) {
     updatedAt: matchRow.updated_at || "",
     editHistory: []
   };
+}
+
+function remoteTeamPlayersToLocal(playerRows, team, embeddedTeam) {
+  const remotePlayers = playerRows
+    .filter((row) => String(row.team || "").toUpperCase() === team)
+    .map(remoteMatchPlayerToLocal);
+
+  if (!remotePlayers.length) return embeddedTeam;
+
+  const embeddedById = new Map(embeddedTeam.map((player) => [player.id, player]));
+  const usedEmbeddedIds = new Set();
+  return remotePlayers.map((player) => {
+    const embeddedPlayer = embeddedById.get(player.id);
+    if (embeddedPlayer) {
+      usedEmbeddedIds.add(embeddedPlayer.id);
+      return normalizePlayerRecord({
+        ...player,
+        ...embeddedPlayer,
+        id: player.id,
+        profileId: player.profileId || embeddedPlayer.profileId || "",
+        ownerUserId: player.ownerUserId || embeddedPlayer.ownerUserId || "",
+        isGuest: player.isGuest || embeddedPlayer.isGuest
+      });
+    }
+    const guestMatch = player.isGuest
+      ? embeddedTeam.find((candidate) => candidate.isGuest && candidate.name === player.name && !usedEmbeddedIds.has(candidate.id))
+      : null;
+    if (guestMatch) {
+      usedEmbeddedIds.add(guestMatch.id);
+      return normalizePlayerRecord({ ...player, ...guestMatch, isGuest: true });
+    }
+    return player;
+  });
 }
 
 function getProfileName(profile) {
@@ -298,7 +349,8 @@ function encodeMatchLocation(location, timing = {}) {
   return JSON.stringify({
     squadcraft: 1,
     location,
-    endTime: timing.endTime || ""
+    endTime: timing.endTime || "",
+    match: timing.match ? serializeMatchPayload(timing.match) : null
   });
 }
 
@@ -309,7 +361,8 @@ function decodeMatchLocation(value) {
     if (parsed?.squadcraft === 1) {
       return {
         location: parsed.location || "",
-        endTime: parsed.endTime || ""
+        endTime: parsed.endTime || "",
+        match: parsed.match && typeof parsed.match === "object" ? parsed.match : null
       };
     }
   } catch {
@@ -318,19 +371,25 @@ function decodeMatchLocation(value) {
 
   return {
     location: rawValue,
-    endTime: ""
+    endTime: "",
+    match: null
   };
 }
 
 function remoteMatchPlayerToLocal(row) {
   const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
   const isGuest = Boolean(row.is_guest) || (!row.profile_id && Boolean(row.guest_name));
-  const roleLabel = row.role_label || row.guest_position || profile?.role || "CM";
+  const roleLabel = row.role_label || row.guest_position || profile?.primary_position || profile?.role || "CM";
   return normalizePlayerRecord({
     id: isGuest ? `guest-${row.id}` : row.profile_id,
     profileId: row.profile_id || "",
-    name: isGuest ? row.guest_name || "Guest" : profile?.name || "Registered Player",
-    positions: { primary: roleLabel },
+    name: isGuest ? row.guest_name || "Guest" : profile?.display_name || profile?.name || "Registered Player",
+    rating: profile?.rating,
+    positions: {
+      primary: roleLabel,
+      secondary: profile?.secondary_position || "",
+      tertiary: profile?.third_position || ""
+    },
     role: roleLabel,
     image: profile?.avatar_url || "",
     isGuest,
@@ -339,6 +398,27 @@ function remoteMatchPlayerToLocal(row) {
     createdAt: row.created_at,
     approvalStatus: "approved"
   });
+}
+
+function serializeMatchPayload(match) {
+  return {
+    teamAName: match.teamAName || "Team A",
+    teamBName: match.teamBName || "Team B",
+    formation: match.formation || match.formationA || "",
+    formationA: match.formationA || match.formation || "",
+    formationB: match.formationB || match.formation || "",
+    teamAPlayers: snapshotTeam(getPersistedTeamPlayers(match, "A")),
+    teamBPlayers: snapshotTeam(getPersistedTeamPlayers(match, "B")),
+    captainA: match.captainA || match.captainAId || "",
+    captainB: match.captainB || match.captainBId || "",
+    managerName: match.managerName || "",
+    managerTeam: match.managerTeam || "",
+    result: match.result || null,
+    scorersA: match.scorersA || match.result?.scorersA || [],
+    scorersB: match.scorersB || match.result?.scorersB || [],
+    liveMotmId: match.liveMotmId || match.result?.manOfTheMatch || "",
+    lastGoal: match.lastGoal || null
+  };
 }
 
 function groupRowsByMatch(rows) {
