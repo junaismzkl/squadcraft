@@ -408,12 +408,25 @@ function localMatchToRemoteMatch(match, options = {}) {
 
 function extractMatchResultPayload(match) {
   if (!match?.result) return null;
+  const resultIdMap = buildRemotePlayerIdMap([
+    ...getPersistedTeamPlayers(match, "A"),
+    ...getPersistedTeamPlayers(match, "B")
+  ]);
+  const scorersA = normalizeResultScorerIds(match.result.scorersA, resultIdMap);
+  const scorersB = normalizeResultScorerIds(match.result.scorersB, resultIdMap);
+  const manOfTheMatch = resultIdMap.get(String(match.result.manOfTheMatch || "").trim()) || match.result.manOfTheMatch || "";
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] result ids being saved`, {
+    matchId: match.id || "",
+    scorerIdsA: scorersA.map((entry) => entry.playerId),
+    scorerIdsB: scorersB.map((entry) => entry.playerId),
+    motmId: manOfTheMatch
+  });
   return {
     scoreA: Number(match.result.scoreA) || 0,
     scoreB: Number(match.result.scoreB) || 0,
-    scorersA: normalizeScorerEntries(match.result.scorersA),
-    scorersB: normalizeScorerEntries(match.result.scorersB),
-    manOfTheMatch: match.result.manOfTheMatch || ""
+    scorersA,
+    scorersB,
+    manOfTheMatch
   };
 }
 
@@ -513,6 +526,9 @@ function remoteMatchToLocal(matchRow, playerRows, profilesById = new Map()) {
     teamAPlayerIds: teamAPlayers.map(getPlayerDebugId),
     teamBPlayerIds: teamBPlayers.map(getPlayerDebugId),
     resultResolution: getResultResolutionDebug(resultPayload, [...teamAPlayers, ...teamBPlayers]),
+    reloadedTeamAPlayerIds: teamAPlayers.map((player) => player.id),
+    reloadedTeamBPlayerIds: teamBPlayers.map((player) => player.id),
+    reloadedMotmId: resultPayload?.manOfTheMatch || "",
     playerRows: playerRows.length,
     teamAPlayers: teamAPlayers.length,
     teamBPlayers: teamBPlayers.length,
@@ -661,6 +677,20 @@ function buildPlayerIdMap(players = []) {
   const idMap = new Map();
   players.forEach((player) => {
     const canonicalId = String(player?.id || "").trim();
+    if (!canonicalId) return;
+    getPlayerIdAliases(player).forEach((alias) => {
+      if (alias && !idMap.has(alias)) idMap.set(alias, canonicalId);
+    });
+  });
+  return idMap;
+}
+
+function buildRemotePlayerIdMap(players = []) {
+  const idMap = new Map();
+  players.forEach((player) => {
+    const canonicalId = player?.isGuest
+      ? String(player?.id || "").trim()
+      : getRegisteredProfileId(player);
     if (!canonicalId) return;
     getPlayerIdAliases(player).forEach((alias) => {
       if (alias && !idMap.has(alias)) idMap.set(alias, canonicalId);

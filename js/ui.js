@@ -2967,13 +2967,13 @@ function getNotificationActorName(match, type) {
   const currentUser = getCurrentUser();
   const currentProfileName = resolveCurrentProfileActorName();
   if (type === "match_created") {
-    return firstKnownName(match.createdByName, getUserName(match.createdBy), currentProfileName, currentUser?.name) || "Unknown";
+    return firstKnownName(currentProfileName, currentUser?.name, match.createdByName, getUserName(match.createdBy)) || "Unknown";
   }
   return firstKnownName(
-    match.updatedByName,
-    getUserName(match.updatedBy),
     currentProfileName,
     currentUser?.name,
+    match.updatedByName,
+    getUserName(match.updatedBy),
     match.createdByName,
     getUserName(match.createdBy)
   ) || "Unknown";

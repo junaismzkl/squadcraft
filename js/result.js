@@ -257,6 +257,9 @@ export function saveMatchResult(event, els) {
     signedInProfileId: state.data.authProfileId || state.data.currentUserId || "",
     isUpdate: isUuid(state.currentTeams.id),
     status: "completed",
+    scorerIdsA: result.scorersA.map((entry) => entry.playerId),
+    scorerIdsB: result.scorersB.map((entry) => entry.playerId),
+    motmId: result.manOfTheMatch,
     result
   });
 

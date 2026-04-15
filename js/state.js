@@ -990,12 +990,13 @@ export function serializeCurrentMatch(overrides = {}) {
   const persistedTeamA = state.currentTeams.teamA;
   const persistedTeamB = state.currentTeams.teamB;
   const persistedPlayerIds = new Set([...persistedTeamA, ...persistedTeamB].map((player) => player.id));
+  const persistedPlayerIdentityIds = buildMatchPlayerIdentityIdSet([...persistedTeamA, ...persistedTeamB]);
   const persistedResult = state.currentTeams.result
     ? {
         ...state.currentTeams.result,
-        scorersA: normalizeScorerEntries(state.currentTeams.result.scorersA).filter((entry) => entry.playerId === OWN_GOAL_ID || persistedPlayerIds.has(entry.playerId)),
-        scorersB: normalizeScorerEntries(state.currentTeams.result.scorersB).filter((entry) => entry.playerId === OWN_GOAL_ID || persistedPlayerIds.has(entry.playerId)),
-        manOfTheMatch: persistedPlayerIds.has(state.currentTeams.result.manOfTheMatch) ? state.currentTeams.result.manOfTheMatch : ""
+        scorersA: normalizeScorerEntries(state.currentTeams.result.scorersA).filter((entry) => entry.playerId === OWN_GOAL_ID || persistedPlayerIdentityIds.has(entry.playerId)),
+        scorersB: normalizeScorerEntries(state.currentTeams.result.scorersB).filter((entry) => entry.playerId === OWN_GOAL_ID || persistedPlayerIdentityIds.has(entry.playerId)),
+        manOfTheMatch: persistedPlayerIdentityIds.has(state.currentTeams.result.manOfTheMatch) ? state.currentTeams.result.manOfTheMatch : ""
       }
     : null;
   const match = {
@@ -1016,9 +1017,9 @@ export function serializeCurrentMatch(overrides = {}) {
     managerName: state.currentTeams.managerName || "",
     managerTeam: state.currentTeams.managerTeam || "",
     result: persistedResult,
-    scorersA: normalizeScorerEntries(state.currentTeams.scorersA).filter((entry) => entry.playerId === OWN_GOAL_ID || persistedPlayerIds.has(entry.playerId)),
-    scorersB: normalizeScorerEntries(state.currentTeams.scorersB).filter((entry) => entry.playerId === OWN_GOAL_ID || persistedPlayerIds.has(entry.playerId)),
-    liveMotmId: persistedPlayerIds.has(state.currentTeams.liveMotmId) ? state.currentTeams.liveMotmId : "",
+    scorersA: normalizeScorerEntries(state.currentTeams.scorersA).filter((entry) => entry.playerId === OWN_GOAL_ID || persistedPlayerIdentityIds.has(entry.playerId)),
+    scorersB: normalizeScorerEntries(state.currentTeams.scorersB).filter((entry) => entry.playerId === OWN_GOAL_ID || persistedPlayerIdentityIds.has(entry.playerId)),
+    liveMotmId: persistedPlayerIdentityIds.has(state.currentTeams.liveMotmId) ? state.currentTeams.liveMotmId : "",
     lastGoal: persistedPlayerIds.has(state.currentTeams.lastGoal?.playerId) ? state.currentTeams.lastGoal : null,
     createdBy: metadata.createdBy,
     createdByName: metadata.createdByName,
@@ -1029,6 +1030,22 @@ export function serializeCurrentMatch(overrides = {}) {
     editHistory: Array.isArray(state.currentTeams.editHistory) ? [...state.currentTeams.editHistory] : []
   };
   return { ...match, ...overrides };
+}
+
+function buildMatchPlayerIdentityIdSet(players = []) {
+  const ids = new Set();
+  players.forEach((player) => {
+    [
+      player?.id,
+      player?.profileId,
+      player?.profile_id,
+      player?.ownerUserId
+    ].forEach((value) => {
+      const id = String(value || "").trim();
+      if (id) ids.add(id);
+    });
+  });
+  return ids;
 }
 
 export function persistCurrentMatch(overrides = {}) {
