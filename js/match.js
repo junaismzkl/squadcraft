@@ -126,6 +126,7 @@ export function generateTeams(matchTime = "", reshuffle = false, options = {}) {
     }
     setTeams({
       id: existingMatchId || `match-${Date.now()}`,
+      originalEditingMatchId: originalMatchId,
       status: "upcoming",
       isDraft: !isEditingSavedMatch,
       createdBy: state.currentTeams?.createdBy || editingSnapshot?.createdBy || currentUser.id,

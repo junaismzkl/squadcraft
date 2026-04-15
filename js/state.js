@@ -105,7 +105,7 @@ export function createDefaultPlayerStats() {
 }
 
 export function derivePlayerStatsFromMatches(matches = []) {
-  return [...(Array.isArray(matches) ? matches : [])].reduce((statsByPlayerId, match) => {
+  return dedupeMatchesById([...(Array.isArray(matches) ? matches : [])].map(normalizeMatchRecord)).reduce((statsByPlayerId, match) => {
     const normalizedMatch = normalizeMatchRecord(match);
     const result = getMatchResult(normalizedMatch);
     if (getMatchStatus(normalizedMatch) !== "completed" || !result) return statsByPlayerId;
@@ -229,12 +229,19 @@ export function updatePlayers(updater) {
 }
 
 export function setMatches(matches) {
+  const matchCountBeforeSet = state.data.matches.length;
+  const incomingMatchCount = Array.isArray(matches) ? matches.length : 0;
   const safeMatches = dedupeMatchesById([...(Array.isArray(matches) ? matches : [])].map(normalizeMatchRecord));
   state.data = {
     ...state.data,
     matches: safeMatches,
     players: applyDerivedStatsToPlayers(state.data.players, safeMatches, "setMatches")
   };
+  console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] setMatches applied`, {
+    before: matchCountBeforeSet,
+    incoming: incomingMatchCount,
+    after: state.data.matches.length
+  });
   debugLog("state.matches updated", { count: state.data.matches.length });
 }
 
@@ -833,6 +840,7 @@ export function restoreUpcomingMatch(match) {
   const metadata = normalizeMatchMetadata(match);
   setTeams({
     id: match.id,
+    originalEditingMatchId: match.originalEditingMatchId || "",
     status: match.status || "upcoming",
     matchTime: matchDateTime(match) ? toDateTimeLocalValue(matchDateTime(match)) : "",
     startTime: matchStartTime(match),
@@ -1011,10 +1019,22 @@ export function persistCurrentMatch(overrides = {}) {
     ...matchOverrides
   } = overrides;
   if (state.currentTeams?.isDraft && !forceSave) return;
+  const teamCountsBeforeSave = getCurrentTeamCounts();
+  normalizeCurrentTeamsForSave();
   const baseMatch = serializeCurrentMatch(matchOverrides);
   if (!baseMatch) return;
   const localMatchIdBeforeSave = baseMatch.id;
-  if (originalMatchId) baseMatch.id = originalMatchId;
+  const enforcedOriginalMatchId = originalMatchId || state.currentTeams?.originalEditingMatchId || "";
+  if (["edit", "result"].includes(saveReason) && !enforcedOriginalMatchId && !isUuid(baseMatch.id)) {
+    console.error(`[SquadCraft ${MATCH_DEBUG_VERSION}] persistCurrentMatch blocked to prevent duplicate remote insert`, {
+      saveReason,
+      currentMatchId: baseMatch.id,
+      originalMatchId,
+      stateOriginalEditingMatchId: state.currentTeams?.originalEditingMatchId || ""
+    });
+    return;
+  }
+  if (enforcedOriginalMatchId) baseMatch.id = enforcedOriginalMatchId;
   const existingMatch = state.data.matches.find((item) => item.id === baseMatch.id);
   const user = getCurrentUser();
   if (!user) return;
@@ -1052,11 +1072,13 @@ export function persistCurrentMatch(overrides = {}) {
     saveReason,
     matchId: match.id,
     localMatchIdBeforeSave,
-    originalMatchId,
+    originalMatchId: enforcedOriginalMatchId,
     status: match.status,
     location: match.location || "",
     teamAPlayers: match.teamAPlayers?.length || 0,
     teamBPlayers: match.teamBPlayers?.length || 0,
+    teamCountsBeforeSave,
+    teamCountsAfterDedupe: getCurrentTeamCounts(),
     auditAction,
     forceSave
   });
@@ -1166,7 +1188,8 @@ export function countScorers(scorers) {
 }
 
 function applyDerivedStatsToPlayers(players = [], matches = [], source = "") {
-  const statsByPlayerId = derivePlayerStatsFromMatches(matches);
+  const dedupedMatches = dedupeMatchesById([...(Array.isArray(matches) ? matches : [])].map(normalizeMatchRecord));
+  const statsByPlayerId = derivePlayerStatsFromMatches(dedupedMatches);
   const nextPlayers = [...(Array.isArray(players) ? players : [])].map((player) => ({
     ...player,
     stats: {
@@ -1174,8 +1197,58 @@ function applyDerivedStatsToPlayers(players = [], matches = [], source = "") {
       ...(statsByPlayerId[player.id] || {})
     }
   }));
-  logDerivedStatsRecompute(source, matches, nextPlayers, statsByPlayerId);
+  logDerivedStatsRecompute(source, dedupedMatches, nextPlayers, statsByPlayerId);
   return nextPlayers;
+}
+
+function getCurrentTeamCounts() {
+  return {
+    teamA: state.currentTeams?.teamA?.length || 0,
+    teamB: state.currentTeams?.teamB?.length || 0
+  };
+}
+
+function normalizeCurrentTeamsForSave() {
+  if (!state.currentTeams) return;
+  const teamA = dedupePlayersById(state.currentTeams.teamA || [], "teamA");
+  const teamB = dedupePlayersById(state.currentTeams.teamB || [], "teamB");
+  const teamAIds = new Set(teamA.map((player) => player.id));
+  const teamBIds = new Set(teamB.map((player) => player.id));
+  state.currentTeams = {
+    ...state.currentTeams,
+    teamA,
+    teamB,
+    captainAId: teamAIds.has(state.currentTeams.captainAId) ? state.currentTeams.captainAId : "",
+    captainBId: teamBIds.has(state.currentTeams.captainBId) ? state.currentTeams.captainBId : "",
+    scorersA: normalizeScorerEntries(state.currentTeams.scorersA || []).filter((entry) => !entry.playerId || entry.playerId === OWN_GOAL_ID || teamAIds.has(entry.playerId)),
+    scorersB: normalizeScorerEntries(state.currentTeams.scorersB || []).filter((entry) => !entry.playerId || entry.playerId === OWN_GOAL_ID || teamBIds.has(entry.playerId))
+  };
+}
+
+function dedupePlayersById(players = [], teamLabel = "") {
+  const seenPlayerIds = new Set();
+  const duplicates = [];
+  const dedupedPlayers = [...(Array.isArray(players) ? players : [])].filter((player) => {
+    const playerId = String(player?.id || "").trim();
+    if (!playerId) return false;
+    if (seenPlayerIds.has(playerId)) {
+      duplicates.push(playerId);
+      return false;
+    }
+    seenPlayerIds.add(playerId);
+    return true;
+  });
+
+  if (duplicates.length) {
+    console.warn(`[SquadCraft ${MATCH_DEBUG_VERSION}] duplicate currentTeams players collapsed before save`, {
+      team: teamLabel,
+      duplicatePlayerIds: duplicates,
+      before: Array.isArray(players) ? players.length : 0,
+      after: dedupedPlayers.length
+    });
+  }
+
+  return dedupedPlayers;
 }
 
 function dedupeMatchesById(matches = []) {
@@ -1202,11 +1275,31 @@ function dedupeMatchesById(matches = []) {
 
 function chooseNewestMatch(existing, candidate) {
   if (!existing) return candidate;
+  const existingCompleteness = getMatchCompleteness(existing);
+  const candidateCompleteness = getMatchCompleteness(candidate);
+  if (candidateCompleteness !== existingCompleteness) {
+    return candidateCompleteness > existingCompleteness ? candidate : existing;
+  }
   return getMatchFreshness(candidate) >= getMatchFreshness(existing) ? candidate : existing;
 }
 
 function getMatchFreshness(match = {}) {
   return new Date(match.updatedAt || match.updated_at || match.createdAt || match.created_at || match.dateTime || match.match_date || 0).getTime() || 0;
+}
+
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
+}
+
+function getMatchCompleteness(match = {}) {
+  const normalizedMatch = normalizeMatchRecord(match);
+  return [
+    isUuid(normalizedMatch.id) ? 1 : 0,
+    matchTeamPlayers(normalizedMatch, "a").length,
+    matchTeamPlayers(normalizedMatch, "b").length,
+    getMatchResult(normalizedMatch) ? 5 : 0,
+    normalizedMatch.updatedAt || normalizedMatch.updated_at ? 1 : 0
+  ].reduce((total, value) => total + Number(value || 0), 0);
 }
 
 function logDerivedStatsRecompute(source, matches = [], players = [], statsByPlayerId = {}) {
@@ -1260,7 +1353,13 @@ export function managerHistoryTeam(match, teamAName, teamBName) {
 }
 
 export function snapshotTeam(players) {
-  return players.map((player) => {
+  const seenPlayerIds = new Set();
+  return [...(Array.isArray(players) ? players : [])].filter((player) => {
+    const playerId = String(player?.id || "").trim();
+    if (!playerId || seenPlayerIds.has(playerId)) return false;
+    seenPlayerIds.add(playerId);
+    return true;
+  }).map((player) => {
     const positions = normalizePlayerPositions(player);
     return {
       id: player.id,

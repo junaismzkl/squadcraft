@@ -252,6 +252,7 @@ export function saveMatchResult(event, els) {
 
   console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] saveMatchResult payload`, {
     matchId: state.currentTeams.id,
+    originalEditingMatchId: state.currentTeams.originalEditingMatchId || "",
     createdBy: state.currentTeams.createdBy || "",
     signedInProfileId: state.data.authProfileId || state.data.currentUserId || "",
     isUpdate: isUuid(state.currentTeams.id),

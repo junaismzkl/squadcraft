@@ -103,6 +103,7 @@ let editActionMessage = "";
 let showLiveMatchScreen = true;
 let activeStatsTab = "goals";
 let editingMatchSnapshot = null;
+let originalEditingMatchId = "";
 let hasPendingMatchEdits = false;
 let notificationsOpen = false;
 const imageDrafts = {
@@ -438,6 +439,7 @@ export function openMatchInViewMode(match, options = {}) {
   restoreUpcomingMatch(match);
   isEditingMatch = false;
   editingMatchSnapshot = null;
+  originalEditingMatchId = "";
   hasPendingMatchEdits = false;
   showLiveMatchScreen = Boolean(options.openLive);
   matchWizardStep = 3;
@@ -1525,7 +1527,7 @@ export function goToLineupStep() {
 
 export function getMatchGenerationOptions() {
   const originalMatchId = isEditingMatch
-    ? editingMatchSnapshot?.id || state.currentTeams?.id || ""
+    ? originalEditingMatchId || editingMatchSnapshot?.id || state.currentTeams?.originalEditingMatchId || ""
     : "";
   return {
     originalMatchId,
@@ -2049,9 +2051,15 @@ function renderMatchDetailActions(match) {
     });
     card.querySelector("[data-match-result]")?.addEventListener("click", () => openResultEditorForMatch(match));
     card.querySelector("[data-match-edit]")?.addEventListener("click", () => {
-    editingMatchSnapshot = cloneMatchSnapshot(serializeCurrentMatch() || match);
+    editingMatchSnapshot = cloneMatchSnapshot(match);
+    originalEditingMatchId = match.id;
     hasPendingMatchEdits = false;
     isEditingMatch = true;
+    updateTeams((teams) => ({
+      ...teams,
+      id: originalEditingMatchId,
+      originalEditingMatchId
+    }));
     matchWizardStep = 3;
     renderMatchSection();
   });
@@ -2679,9 +2687,18 @@ export function closeNotificationsPanel() {
 
 function finishMatchEditing() {
   if (!state.currentTeams) return;
-  const originalMatchId = editingMatchSnapshot?.id || state.currentTeams.id;
+  const originalMatchId = originalEditingMatchId || editingMatchSnapshot?.id || "";
+  if (!originalMatchId) {
+    console.error(`[SquadCraft ${MATCH_DEBUG_VERSION}] finishMatchEditing blocked: missing originalEditingMatchId`, {
+      currentMatchId: state.currentTeams.id,
+      editingMatchSnapshot
+    });
+    alert("Could not save edit because the original match id was lost. Reopen the match and try again.");
+    return;
+  }
   console.info(`[SquadCraft ${MATCH_DEBUG_VERSION}] finishMatchEditing`, {
     currentMatchId: state.currentTeams.id,
+    originalEditingMatchId,
     originalMatchId,
     teamAPlayers: state.currentTeams.teamA?.length || 0,
     teamBPlayers: state.currentTeams.teamB?.length || 0
@@ -2689,6 +2706,7 @@ function finishMatchEditing() {
   updateTeams((teams) => ({
     ...teams,
     id: originalMatchId,
+    originalEditingMatchId,
     status: "upcoming",
     isDraft: false
   }));
@@ -2701,6 +2719,7 @@ function finishMatchEditing() {
     logAction: "match_edited"
   });
   editingMatchSnapshot = cloneMatchSnapshot(serializeCurrentMatch());
+  originalEditingMatchId = "";
   hasPendingMatchEdits = false;
   isEditingMatch = false;
   clearManualSwapSelection();
@@ -2713,7 +2732,14 @@ export function openResultEditorForMatch(match) {
     alert("You do not have permission to edit this match.");
     return;
   }
+  editingMatchSnapshot = cloneMatchSnapshot(match);
+  originalEditingMatchId = match.id;
   restoreUpcomingMatch(match);
+  updateTeams((teams) => ({
+    ...teams,
+    id: originalEditingMatchId,
+    originalEditingMatchId
+  }));
   if (getMatchStatus(state.currentTeams) === "upcoming" || getMatchStatus(state.currentTeams) === "live") {
     markCurrentMatchPendingResult();
   }
@@ -2728,6 +2754,7 @@ function cancelMatchEditing() {
   }
   hasPendingMatchEdits = false;
   isEditingMatch = false;
+  originalEditingMatchId = "";
   clearManualSwapSelection();
   matchWizardStep = 3;
   renderMatchSection();
@@ -2890,6 +2917,7 @@ function to24HourTime(hour, minute, period) {
 function resetMatchSetupState() {
   isEditingMatch = false;
   editingMatchSnapshot = null;
+  originalEditingMatchId = "";
   hasPendingMatchEdits = false;
   clearManualSwapSelection();
   clearMatchGuestPlayers();
