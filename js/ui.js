@@ -1208,8 +1208,7 @@ export function createPlayerCard(player, options = {}) {
     const primaryPosition = getPrimaryPosition(player);
     const positionSummary = formatPlayerPositions(player);
     const rating = clampRating(player.rating);
-    const jerseyNumber = String(player.jerseyNumber ?? player.jersey_number ?? "").trim();
-    const visibleCardValueMarkup = getPlayerCardValueMarkup({ rating, jerseyNumber });
+    const visibleCardValueMarkup = getPlayerCardValueMarkup({ rating });
     const stats = getPlayerStats(player);
     const actionMarkup = cardActionMarkup(player, options);
     const claimStatusMarkup = getClaimStatusMarkup(player);
@@ -1260,14 +1259,11 @@ export function createPlayerCard(player, options = {}) {
   return card;
 }
 
-function getPlayerCardValueMarkup({ rating, jerseyNumber }) {
+function getPlayerCardValueMarkup({ rating }) {
   if (shouldShowVisiblePlayerRating()) {
     return `<strong class="player-card-rating">${rating}</strong>`;
   }
-  if (jerseyNumber) {
-    return `<strong class="player-card-jersey">#${escapeHtml(jerseyNumber)}</strong>`;
-  }
-  return '<strong class="player-card-neutral" aria-hidden="true">-</strong>';
+  return "";
 }
 
 function getClaimStatusMarkup(player) {
