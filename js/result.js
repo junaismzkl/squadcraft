@@ -379,6 +379,7 @@ export function getScore(els, team) {
 }
 
 function rebuildPlayerStatsFromCompletedMatches() {
+  const canonicalPlayerIdByAlias = buildCanonicalPlayerIdByAlias(state.data.players);
   const nextStatsByPlayerId = Object.fromEntries(
     state.data.players.map((player) => [player.id, createDefaultPlayerStats()])
   );
@@ -394,15 +395,16 @@ function rebuildPlayerStatsFromCompletedMatches() {
     const allPlayers = [...(match.teamAPlayers || []), ...(match.teamBPlayers || [])];
 
     allPlayers.forEach((player) => {
-      const stats = nextStatsByPlayerId[player.id];
+      const canonicalPlayerId = canonicalPlayerIdByAlias.get(String(player?.id || "").trim()) || String(player?.id || "").trim();
+      const stats = nextStatsByPlayerId[canonicalPlayerId];
       if (!stats) return;
       const teamKey = teamAIds.has(player.id) ? "a" : teamBIds.has(player.id) ? "b" : "";
       stats.matches += 1;
       stats.wins += outcome === teamKey ? 1 : 0;
       stats.draws += outcome === "draw" ? 1 : 0;
       stats.losses += outcome !== "draw" && outcome !== teamKey ? 1 : 0;
-      stats.goals += goalsByPlayer[player.id] || 0;
-      stats.motm += player.id === result.manOfTheMatch ? 1 : 0;
+      stats.goals += goalsByPlayer[canonicalPlayerId] || goalsByPlayer[player.id] || 0;
+      stats.motm += canonicalPlayerId === result.manOfTheMatch || player.id === result.manOfTheMatch ? 1 : 0;
       stats.cleanSheets += getCleanSheetIncrement(player, teamKey, result);
     });
   });
@@ -413,6 +415,29 @@ function rebuildPlayerStatsFromCompletedMatches() {
       stats: nextStatsByPlayerId[player.id] || createDefaultPlayerStats()
     }))
   );
+}
+
+function buildCanonicalPlayerIdByAlias(players = []) {
+  const aliasMap = new Map();
+  players.forEach((player) => {
+    const canonicalId = String(player?.id || "").trim();
+    if (!canonicalId) return;
+    getPlayerIdAliases(player).forEach((alias) => {
+      if (alias && !aliasMap.has(alias)) aliasMap.set(alias, canonicalId);
+    });
+  });
+  return aliasMap;
+}
+
+function getPlayerIdAliases(player = {}) {
+  return [
+    player.id,
+    player.profileId,
+    player.profile_id,
+    player.ownerUserId,
+    player.authUserId,
+    player.auth_user_id
+  ].map((value) => String(value || "").trim()).filter(Boolean);
 }
 
 function getScorerEntries(teamKey) {
