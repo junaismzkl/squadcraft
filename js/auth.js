@@ -17,6 +17,7 @@ export const authState = {
 export function isApprovedProfile(profile = authState.currentProfile) {
   if (!profile) return false;
   if (profile.role === "super_admin" && profile.is_active === true) return true;
+  if (isClaimedAdminCreatedProfile(profile)) return true;
   if (!authState.approvalSchemaReady || profile.approval_status === undefined) {
     return profile.is_active === true;
   }
@@ -32,6 +33,12 @@ export function canManageRoles(profile = authState.currentProfile) {
 }
 
 const MANAGEABLE_PROFILE_ROLES = ["user", "admin", "super_admin"];
+
+function isClaimedAdminCreatedProfile(profile) {
+  return profile?.is_active === true
+    && profile?.claim_status === "claimed"
+    && Boolean(String(profile?.created_by || "").trim());
+}
 
 function resolveApprovalRole(selectedRole) {
   if (!canManageRoles()) return "user";
