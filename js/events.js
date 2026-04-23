@@ -350,6 +350,9 @@ async function handleProfileAvatarChange(event) {
 function populateProfileForm() {
   const profile = authState.currentProfile || {};
   const email = authState.currentAuthUser?.email || "";
+  const visibleAccountLabel = profile.login_username
+    ? `Username: ${profile.login_username}`
+    : email || "Signed in";
   const avatar = profile.avatar_url || "";
 
   if (els.authProfileName) els.authProfileName.value = profile.name || "";
@@ -359,11 +362,11 @@ function populateProfileForm() {
   if (els.authProfileThirdPosition) els.authProfileThirdPosition.value = profile.third_position || "";
   if (els.authProfileDominantFoot) els.authProfileDominantFoot.value = profile.dominant_foot || "";
   if (els.authProfileJerseyNumber) els.authProfileJerseyNumber.value = profile.jersey_number ?? "";
-  if (els.authProfileEmail) els.authProfileEmail.textContent = email || "Signed in";
+  if (els.authProfileEmail) els.authProfileEmail.textContent = visibleAccountLabel;
   if (els.authProfileRole) els.authProfileRole.textContent = formatRoleLabel(profile.role || "user");
   if (els.authProfileAvatar) els.authProfileAvatar.value = "";
   if (els.authProfileAvatarPreview) {
-    els.authProfileAvatarPreview.src = avatar || createProfilePlaceholder(profile.name || email || "User");
+    els.authProfileAvatarPreview.src = avatar || createProfilePlaceholder(profile.name || profile.login_username || email || "User");
   }
   setImageUploadValue("profile", avatar);
   setProfileMessage("Role is controlled by admins. Add a display name and primary position to complete your player profile.");

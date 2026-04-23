@@ -242,11 +242,16 @@ function renderAuthState() {
   const profile = authState.currentProfile;
   const hasSession = Boolean(authState.isAuthenticated);
   const hasProfile = Boolean(profile);
+  const visibleAccountName = profile?.display_name
+    || profile?.name
+    || profile?.login_username
+    || authState.currentAuthUser?.email
+    || "Signed in";
 
   if (els.accountMenuUser) {
     const roleLabel = profile?.role ? ` - ${formatRoleLabel(profile.role)}` : "";
     els.accountMenuUser.textContent = hasSession
-      ? `${profile?.display_name || profile?.name || authState.currentAuthUser?.email || "Signed in"}${roleLabel}`
+      ? `${visibleAccountName}${roleLabel}`
       : "Account";
   }
 

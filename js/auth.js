@@ -257,7 +257,11 @@ export async function saveCurrentProfile({
     player_profile_completed: playerProfileCompleted,
     role: authState.currentProfile?.role || "user",
     is_active: authState.currentProfile?.is_active ?? false,
-    approval_status: authState.currentProfile?.approval_status || "pending"
+    approval_status: authState.currentProfile?.approval_status || "pending",
+    claim_status: authState.currentProfile?.claim_status || "claimed",
+    claimed_at: authState.currentProfile?.claimed_at || null,
+    login_username: authState.currentProfile?.login_username || null,
+    created_by: authState.currentProfile?.created_by || null
   };
 
   if (avatarUrl !== undefined) {
@@ -266,9 +270,19 @@ export async function saveCurrentProfile({
     profilePatch.avatar_url = authState.currentProfile.avatar_url;
   }
 
-  const { data, error } = await supabase
-    .from("profiles")
-    .upsert(profilePatch)
+  const existingProfileId = String(authState.currentProfile?.id || "").trim();
+  const isClaimedProfile = Boolean(existingProfileId && authState.currentProfile?.auth_user_id === user.id);
+  const profileQuery = isClaimedProfile
+    ? supabase
+        .from("profiles")
+        .update(profilePatch)
+        .eq("id", existingProfileId)
+        .eq("auth_user_id", user.id)
+    : supabase
+        .from("profiles")
+        .upsert(profilePatch);
+
+  const { data, error } = await profileQuery
     .select("*")
     .single();
 
