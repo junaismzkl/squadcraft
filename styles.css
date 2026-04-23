@@ -361,6 +361,39 @@ main {
   gap: 12px;
 }
 
+.claim-profile-preview {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 215, 0, 0.12);
+  border-radius: 12px;
+}
+
+.claim-profile-preview span {
+  color: #bac4d2;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.claim-profile-preview strong,
+.claim-profile-preview p {
+  margin: 0;
+}
+
+.claim-profile-preview strong {
+  color: #f8fafc;
+  font-size: 0.95rem;
+}
+
+.claim-profile-preview p {
+  color: #f5d76e;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
 .profile-editor-summary {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -745,6 +778,18 @@ main {
   justify-content: flex-start;
   gap: 10px;
   margin-bottom: 14px;
+}
+
+.players-toolbar > .primary,
+.players-toolbar > .secondary {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 640px) {
+  .players-toolbar > .primary,
+  .players-toolbar > .secondary {
+    flex: 1 1 180px;
+  }
 }
 
 #toggle-manage-players.active {
@@ -1313,6 +1358,49 @@ select:focus {
 
 .match-finished-modal-card h3 {
   margin: 0 0 8px;
+}
+
+.claim-result-modal-card {
+  display: grid;
+  gap: 16px;
+  text-align: left;
+}
+
+.claim-result-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.claim-result-field {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 215, 0, 0.12);
+  border-radius: 18px;
+}
+
+.claim-result-field span {
+  color: #bac4d2;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.claim-result-field strong {
+  color: #f8fafc;
+  font-size: 0.94rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.claim-result-feedback {
+  min-height: 1.2em;
+  margin: 0;
+  color: #d8f5df;
+  font-size: 0.82rem;
+  font-weight: 800;
 }
 
 .image-preview-modal-card {
@@ -1902,6 +1990,32 @@ select:focus {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: rgba(255, 236, 162, 0.76);
+}
+
+.player-card-claim-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  width: fit-content;
+  margin: 6px auto 0;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.player-card-claim-status.pending {
+  color: #171717;
+  background: linear-gradient(135deg, #ffe082 0%, #ffd700 100%);
+}
+
+.player-card-claim-status.claimed {
+  color: #f8fafc;
+  background: rgba(34, 197, 94, 0.18);
+  border: 1px solid rgba(34, 197, 94, 0.28);
 }
 
 .player-card-body {

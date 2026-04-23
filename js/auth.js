@@ -7,6 +7,8 @@ export const authState = {
   currentProfile: null,
   pendingProfiles: [],
   approvalSchemaReady: true,
+  claimProfilePreview: null,
+  claimFlowActive: false,
   isAuthenticated: false,
   isLoading: false,
   error: ""
@@ -57,9 +59,16 @@ export async function initAuth() {
   return authState;
 }
 
-export async function signInWithEmailPassword(email, password) {
+export async function signInWithEmailPassword(identifier, password) {
   authState.isLoading = true;
   authState.error = "";
+
+  const email = await resolveSignInEmail(identifier);
+  if (!email) {
+    authState.isLoading = false;
+    authState.error = "No claimed profile was found for that email or username.";
+    return { ok: false, message: authState.error };
+  }
 
   const { data, error } = await supabase.auth.signInWithPassword({
     email,
@@ -79,46 +88,84 @@ export async function signInWithEmailPassword(email, password) {
   return { ok: true };
 }
 
-export async function createAccountWithEmailPassword({ email, password, name }) {
+export async function createAccountWithEmailPassword({ claimCode, username, password }) {
   authState.isLoading = true;
   authState.error = "";
 
+  const safeClaimCode = normalizeClaimCode(claimCode);
+  if (!safeClaimCode) {
+    authState.isLoading = false;
+    return { ok: false, message: "Claim code is required." };
+  }
+
+  const previewResult = await loadClaimableProfile(safeClaimCode);
+  if (!previewResult.ok) {
+    authState.isLoading = false;
+    authState.error = previewResult.message || "Claim code is invalid.";
+    return { ok: false, message: authState.error };
+  }
+
+  const safeUsername = normalizeUsername(previewResult.profile?.login_username || username);
+  if (!safeUsername) {
+    authState.isLoading = false;
+    return { ok: false, message: "A valid claim username was not found for this profile." };
+  }
+
+  authState.claimFlowActive = true;
+  const email = buildClaimEmail(safeUsername);
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
-      data: { name: name || "" },
-      emailRedirectTo: "https://squadcraft.pages.dev"
+      data: { username: safeUsername, claim_code: safeClaimCode }
     }
   });
 
   if (error) {
+    authState.claimFlowActive = false;
     authState.isLoading = false;
     authState.error = error.message || "Account creation failed.";
     return { ok: false, message: authState.error };
   }
 
-  if (data.user && data.session) {
-    const profileResult = await createPendingProfile(data.user, { name });
-    if (!profileResult.ok) {
-      authState.isLoading = false;
-      return profileResult;
-    }
+  if (!data.user) {
+    authState.claimFlowActive = false;
+    authState.isLoading = false;
+    authState.error = "Auth account was not created.";
+    return { ok: false, message: authState.error };
   }
 
-  if (data.session) {
-    await applySession(data.session);
-  } else if (data.user) {
-    console.warn("Signup created an auth user without an active session. Pending profile will be created on first confirmed sign-in.", { userId: data.user.id });
+  if (!data.session) {
+    authState.claimFlowActive = false;
+    authState.isLoading = false;
+    return {
+      ok: false,
+      message: "Supabase email confirmation is still enabled. Turn it off for this project before using no-email profile claims."
+    };
   }
 
+  const claimResult = await finalizeProfileClaim({
+    profileId: previewResult.profile.id,
+    claimCode: safeClaimCode,
+    authUserId: data.user.id,
+    username: safeUsername,
+    email
+  });
+
+  if (!claimResult.ok) {
+    authState.claimFlowActive = false;
+    authState.isLoading = false;
+    authState.error = claimResult.message || "Could not claim profile.";
+    return { ok: false, message: authState.error };
+  }
+
+  await applySession(data.session);
+
+  authState.claimFlowActive = false;
   authState.isLoading = false;
   return {
     ok: true,
-    needsEmailConfirmation: !data.session,
-    message: data.session
-      ? "Account created."
-      : "Account created. Check your email to confirm your account, then sign in. Check spam/junk if you do not see the email."
+    message: "Profile claimed. You can now sign in with your username and password."
   };
 }
 
@@ -191,7 +238,8 @@ export async function saveCurrentProfile({
   const safePrimaryPosition = normalizePlayerPosition(primaryPosition);
   const playerProfileCompleted = Boolean((safeDisplayName || safeName) && safePrimaryPosition);
   const profilePatch = {
-    id: user.id,
+    id: authState.currentProfile?.id || user.id,
+    auth_user_id: authState.currentProfile?.auth_user_id || user.id,
     name: safeName,
     display_name: safeDisplayName,
     primary_position: safePrimaryPosition,
@@ -572,10 +620,13 @@ export async function loadCurrentProfile(userId = authState.currentAuthUser?.id)
   const { data, error } = await supabase
     .from("profiles")
     .select("*")
-    .eq("id", userId)
+    .eq("auth_user_id", userId)
     .maybeSingle();
 
   if (error) {
+    if (isMissingColumnError(error, "auth_user_id")) {
+      return loadLegacyCurrentProfile(userId);
+    }
     if (isMissingApprovalSchemaError(error)) {
       authState.approvalSchemaReady = false;
       console.warn("Supabase profiles approval columns are missing. Using legacy profile fields until the schema is updated.");
@@ -586,12 +637,114 @@ export async function loadCurrentProfile(userId = authState.currentAuthUser?.id)
   }
 
   if (!data) {
-    console.warn("No Supabase profile row found for authenticated user.", { userId });
-    return { profile: null, error: "No profile row found." };
+    const legacyProfile = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (legacyProfile.error) {
+      if (isMissingApprovalSchemaError(legacyProfile.error)) {
+        authState.approvalSchemaReady = false;
+        console.warn("Supabase profiles approval columns are missing. Using legacy profile fields until the schema is updated.");
+        return loadLegacyCurrentProfile(userId);
+      }
+      console.error("Failed to load legacy-mapped Supabase profile.", legacyProfile.error);
+      return { profile: null, error: legacyProfile.error.message };
+    }
+
+    if (!legacyProfile.data) {
+      console.warn("No Supabase profile row found for authenticated user.", { userId });
+      return { profile: null, error: "No profile row found." };
+    }
+
+    authState.approvalSchemaReady = Boolean(legacyProfile.data && Object.prototype.hasOwnProperty.call(legacyProfile.data, "approval_status"));
+    return { profile: legacyProfile.data, error: "" };
   }
 
   authState.approvalSchemaReady = Boolean(data && Object.prototype.hasOwnProperty.call(data, "approval_status"));
   return { profile: data, error: "" };
+}
+
+export async function loadClaimableProfile(claimCode) {
+  const safeClaimCode = normalizeClaimCode(claimCode);
+  if (!safeClaimCode) return { ok: false, message: "Claim code is required." };
+
+  const { data, error } = await supabase.rpc("preview_profile_claim", {
+    p_claim_code: safeClaimCode
+  });
+
+  if (error) {
+    authState.error = error.message || "Could not verify claim code.";
+    return { ok: false, message: authState.error };
+  }
+
+  const preview = Array.isArray(data) ? data[0] : data;
+  if (!preview) return { ok: false, message: "Claim code is invalid or already used." };
+
+  authState.claimProfilePreview = preview;
+  return { ok: true, profile: preview };
+}
+
+async function finalizeProfileClaim({ profileId, claimCode, authUserId, username, email }) {
+  const { data, error } = await supabase.rpc("claim_player_profile", {
+    p_profile_id: profileId,
+    p_claim_code: claimCode,
+    p_auth_user_id: authUserId,
+    p_login_username: username,
+    p_login_email: email
+  });
+
+  if (error) {
+    console.error("Failed to finalize claimed profile.", error);
+    return { ok: false, message: error.message || "Could not claim profile." };
+  }
+
+  const profile = Array.isArray(data) ? data[0] : data;
+  if (!profile) return { ok: false, message: "Claim code is invalid or already used." };
+
+  authState.currentProfile = profile;
+  setAuthenticatedProfile(profile);
+  return { ok: true, profile };
+}
+
+async function resolveSignInEmail(identifier) {
+  const value = String(identifier || "").trim();
+  if (!value) return "";
+  if (value.includes("@")) return value;
+
+  const username = normalizeUsername(value);
+  if (!username) return "";
+
+  const { data, error } = await supabase.rpc("resolve_profile_login_email", {
+    p_login_username: username
+  });
+
+  if (error) {
+    console.error("Failed to resolve username sign-in.", error);
+    return "";
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+  return String(row?.login_email || "").trim();
+}
+
+function buildClaimEmail(username) {
+  return `${username}@player.squadcraft.local`;
+}
+
+function normalizeUsername(value) {
+  const username = String(value || "").trim().toLowerCase();
+  return /^[a-z0-9_]{3,24}$/.test(username) ? username : "";
+}
+
+function normalizeClaimCode(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function isMissingColumnError(error, columnName) {
+  const message = String(error?.message || "");
+  return message.includes(columnName);
 }
 
 async function applySession(session) {
@@ -609,6 +762,11 @@ async function applySession(session) {
   let nextProfile = profile;
 
   if (!nextProfile) {
+    if (authState.claimFlowActive) {
+      clearAuthenticatedProfile();
+      authState.currentProfile = null;
+      return;
+    }
     console.warn("Authenticated user has no profile row. Creating pending profile.", { userId: session.user.id });
     const createdProfile = await createPendingProfile(session.user, {
       name: session.user.user_metadata?.name || session.user.email || "User"

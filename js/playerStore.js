@@ -1,7 +1,7 @@
 import { supabase } from "./supabaseClient.js?v=match-debug-v5";
 import { normalizePlayerRecord, setPlayers, state } from "./state.js?v=match-debug-v5";
 
-const PROFILE_PLAYER_FIELDS = "id,name,display_name,avatar_url,role,is_active,approval_status,approved_by,approved_at,created_at,updated_at,primary_position,secondary_position,third_position,player_profile_completed,rating,dominant_foot,jersey_number";
+const PROFILE_PLAYER_FIELDS = "id,name,display_name,avatar_url,role,is_active,approval_status,approved_by,approved_at,created_at,updated_at,primary_position,secondary_position,third_position,player_profile_completed,rating,dominant_foot,jersey_number,created_by,claim_status,claimed_at,auth_user_id,login_username";
 
 export async function loadSharedPlayersIntoState() {
   const baseQuery = supabase
@@ -37,6 +37,55 @@ export async function loadSharedPlayersIntoState() {
 
 export async function saveSharedPlayer(player) {
   return { ok: true, player };
+}
+
+export async function createClaimableProfile(details = {}, currentProfile = null) {
+  const creatorId = String(currentProfile?.id || "").trim();
+  if (!creatorId) return { ok: false, message: "Only admins can create claimable player profiles." };
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const claimCode = generateClaimCode();
+    const username = await generateUniqueUsername(details.name || details.displayName || "player");
+    const patch = {
+      id: crypto.randomUUID(),
+      created_by: creatorId,
+      claim_code: claimCode,
+      claim_status: "pending",
+      claimed_at: null,
+      auth_user_id: null,
+      login_username: username,
+      login_email: null,
+      approval_status: "approved",
+      is_active: true,
+      role: "user",
+      approved_by: creatorId,
+      approved_at: new Date().toISOString(),
+      ...profileDetailsToPatch(details)
+    };
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .insert(patch)
+      .select("*")
+      .single();
+
+    if (error) {
+      if (isClaimIdentityConflict(error)) continue;
+      console.warn("Could not create claimable profile.", error);
+      return { ok: false, message: error.message };
+    }
+
+    await loadSharedPlayersIntoState();
+    return {
+      ok: true,
+      profile: data,
+      username,
+      claimCode,
+      claimLink: `${window.location.origin}${window.location.pathname}?claim=${encodeURIComponent(claimCode)}`
+    };
+  }
+
+  return { ok: false, message: "Could not generate a unique claim identity. Please try again." };
 }
 
 export async function approveSharedPlayer(playerId, approvalPatch) {
@@ -134,7 +183,9 @@ function profileToPlayer(profile) {
     dominantFoot: profile.dominant_foot || "",
     playerProfileCompleted: Boolean(profile.player_profile_completed),
     profileBacked: true,
-    profileRole: profile.role || "user"
+    profileRole: profile.role || "user",
+    claimStatus: profile.claim_status || "claimed",
+    loginUsername: profile.login_username || ""
   });
 }
 
@@ -174,4 +225,51 @@ function normalizeJerseyNumber(value) {
 
 function normalizeRating(value) {
   return Math.max(50, Math.min(100, Math.round(Number(value) || 50)));
+}
+
+function generateClaimCode() {
+  const raw = crypto.randomUUID().replace(/-/g, "").toUpperCase();
+  return `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`;
+}
+
+async function generateUniqueUsername(name) {
+  const base = normalizeUsernameBase(name);
+  let candidate = base;
+  let suffix = 0;
+
+  while (suffix < 50) {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("login_username", candidate)
+      .maybeSingle();
+
+    if (error) {
+      console.warn("Could not verify claim username uniqueness.", error);
+      return candidate;
+    }
+
+    if (!data) return candidate;
+    suffix += 1;
+    candidate = `${base}${suffix}`;
+  }
+
+  return `${base}${Date.now().toString().slice(-4)}`;
+}
+
+function normalizeUsernameBase(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/_+/g, "_");
+  return (normalized || "player").slice(0, 18);
+}
+
+function isClaimIdentityConflict(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return error?.code === "23505"
+    || message.includes("login_username")
+    || message.includes("claim_code");
 }

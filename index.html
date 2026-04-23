@@ -34,7 +34,7 @@
           <div class="account-menu hidden" id="account-menu">
             <div class="account-menu-user" id="account-menu-user"></div>
             <button class="account-menu-item" id="account-sign-in" type="button">Sign In</button>
-            <button class="account-menu-item" id="account-create" type="button">Create Account</button>
+            <button class="account-menu-item" id="account-create" type="button">Claim Profile</button>
             <button class="account-menu-item hidden" id="account-profile" type="button">Profile</button>
             <button class="account-menu-item hidden" id="account-approvals" type="button">Approvals</button>
             <button class="account-menu-item hidden" id="auth-logout" type="button">Log Out</button>
@@ -52,16 +52,21 @@
         </div>
         <p class="auth-modal-message hidden" id="auth-modal-message" role="status"></p>
         <form class="auth-form" id="auth-sign-in-form">
-          <label>Email <input id="auth-email" type="email" autocomplete="email" required></label>
+          <label>Email or Username <input id="auth-email" type="text" autocomplete="username" required></label>
           <label>Password <input id="auth-password" type="password" autocomplete="current-password" required></label>
           <button class="primary" id="auth-login-button" type="submit">Sign In</button>
         </form>
         <form class="auth-form hidden" id="auth-create-form">
-          <label>Name <input id="auth-create-name" type="text" autocomplete="name"></label>
-          <label>Email <input id="auth-create-email" type="email" autocomplete="email" required></label>
+          <label>Claim Code <input id="auth-claim-code" type="text" autocomplete="one-time-code" required></label>
+          <div class="claim-profile-preview hidden" id="auth-claim-preview">
+            <span>Claiming Profile</span>
+            <strong id="auth-claim-preview-name"></strong>
+            <p id="auth-claim-preview-username"></p>
+          </div>
+          <label>Username <input id="auth-create-name" type="text" autocomplete="username" readonly required></label>
           <label>Password <input id="auth-create-password" type="password" autocomplete="new-password" required></label>
           <label>Confirm Password <input id="auth-create-confirm" type="password" autocomplete="new-password" required></label>
-          <button class="primary" id="auth-create-button" type="submit">Create Account</button>
+          <button class="primary" id="auth-create-button" type="submit">Claim Profile</button>
         </form>
         <form class="auth-form hidden" id="auth-profile-form">
           <div class="profile-editor-summary">
@@ -168,7 +173,7 @@
         </div>
 
         <div class="players-toolbar">
-          <button class="primary" id="show-player-form" type="button">+ Create New Player</button>
+          <button class="primary" id="show-player-form" type="button">+ Add Player</button>
         </div>
 
         <form class="card form-grid hidden" id="player-form">
@@ -500,6 +505,39 @@
         <button class="ghost" id="image-preview-change" type="button">Re-upload</button>
         <button class="secondary" id="image-preview-cancel" type="button">Cancel</button>
         <button class="primary" id="image-preview-save" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="match-finished-modal hidden" id="claim-result-modal" role="dialog" aria-modal="true" aria-labelledby="claim-result-title">
+    <div class="match-finished-modal-card claim-result-modal-card">
+      <p class="eyebrow">Player Created</p>
+      <h3 id="claim-result-title">Claim Details Ready</h3>
+      <p class="image-preview-copy">Share these details with the player so they can claim their profile.</p>
+      <div class="claim-result-grid">
+        <div class="claim-result-field">
+          <span>Player Name</span>
+          <strong id="claim-result-player-name"></strong>
+        </div>
+        <div class="claim-result-field">
+          <span>Username</span>
+          <strong id="claim-result-username"></strong>
+          <button class="secondary compact-button" id="claim-copy-username" type="button">Copy Username</button>
+        </div>
+        <div class="claim-result-field">
+          <span>Claim Code</span>
+          <strong id="claim-result-code"></strong>
+          <button class="secondary compact-button" id="claim-copy-code" type="button">Copy Claim Code</button>
+        </div>
+        <div class="claim-result-field">
+          <span>Claim Link</span>
+          <strong id="claim-result-link"></strong>
+          <button class="secondary compact-button" id="claim-copy-link" type="button">Copy Claim Link</button>
+        </div>
+      </div>
+      <p class="claim-result-feedback" id="claim-result-feedback" role="status"></p>
+      <div class="form-actions">
+        <button class="primary full-width" id="claim-result-close" type="button">Done</button>
       </div>
     </div>
   </div>

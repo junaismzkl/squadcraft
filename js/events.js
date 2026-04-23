@@ -1,5 +1,5 @@
 import { els } from "./dom.js?v=match-debug-v5";
-import { authState, createAccountWithEmailPassword, saveCurrentProfile, signInWithEmailPassword, signOutCurrentUser } from "./auth.js?v=match-debug-v5";
+import { authState, createAccountWithEmailPassword, loadClaimableProfile, saveCurrentProfile, signInWithEmailPassword, signOutCurrentUser } from "./auth.js?v=match-debug-v5";
 import { loadSharedMatchesIntoState } from "./matchStore.js?v=match-debug-v5";
 import { generateTeams, getMatchSettings, toggleSelectAllPlayers } from "./match.js?v=match-debug-v5";
 import { loadSharedPlayersIntoState } from "./playerStore.js?v=match-debug-v5";
@@ -50,6 +50,8 @@ export function bindEvents() {
   els.authModal?.addEventListener("click", handleAuthModalBackdrop);
   els.authSignInForm?.addEventListener("submit", handleAuthLogin);
   els.authCreateForm?.addEventListener("submit", handleCreateAccount);
+  els.authClaimCode?.addEventListener("change", handleClaimCodeChange);
+  els.authClaimCode?.addEventListener("input", handleClaimCodeInput);
   els.authProfileForm?.addEventListener("submit", handleProfileSave);
   els.authProfileAvatar?.addEventListener("change", handleProfileAvatarChange);
   els.authProfileAvatarChange?.addEventListener("click", () => triggerImageUpload("profile"));
@@ -116,6 +118,9 @@ export function bindEvents() {
   });
   document.addEventListener("click", handleDocumentClick);
   document.addEventListener("live-match:updated", handleLiveMatchUpdate);
+  if (new URLSearchParams(window.location.search).get("claim")) {
+    openCreateAccountModal();
+  }
 }
 
 function handleMatchSyncError(event) {
@@ -161,7 +166,15 @@ function openAuthModal(mode) {
   els.authSignInForm.classList.toggle("hidden", mode !== "sign_in");
   els.authCreateForm.classList.toggle("hidden", mode !== "create_account");
   els.authProfileForm.classList.toggle("hidden", mode !== "profile");
-  els.authModalTitle.textContent = mode === "create_account" ? "Create Account" : mode === "profile" ? "Profile Setup" : "Sign In";
+  els.authModalTitle.textContent = mode === "create_account" ? "Claim Profile" : mode === "profile" ? "Profile Setup" : "Sign In";
+  if (mode === "create_account" && els.authClaimCode && !els.authClaimCode.value) {
+    const claimCode = new URLSearchParams(window.location.search).get("claim");
+    if (claimCode) els.authClaimCode.value = claimCode;
+  }
+  if (mode === "create_account") {
+    updateClaimPreview(null);
+    if (els.authClaimCode?.value.trim()) loadClaimPreview(els.authClaimCode.value.trim());
+  }
   if (mode === "profile") {
     populateProfileForm();
   }
@@ -200,19 +213,23 @@ async function handleAuthLogin(event) {
 
 async function handleCreateAccount(event) {
   event.preventDefault();
-  const name = els.authCreateName.value.trim();
-  const email = els.authCreateEmail.value.trim();
+  const claimCode = els.authClaimCode.value.trim();
+  const username = els.authCreateName.value.trim();
   const password = els.authCreatePassword.value;
   const confirmPassword = els.authCreateConfirm.value;
 
-  if (!email || !password) return;
+  if (!claimCode || !password) return;
   if (password !== confirmPassword) {
     setAuthModalMessage("Passwords do not match.", true);
     return;
   }
+  if (!username) {
+    setAuthModalMessage("Enter a valid claim code to load the profile first.", true);
+    return;
+  }
 
   els.authCreateButton.disabled = true;
-  const result = await createAccountWithEmailPassword({ email, password, name });
+  const result = await createAccountWithEmailPassword({ claimCode, username, password });
   els.authCreateButton.disabled = false;
   els.authMessage.textContent = result.message || "";
   setAuthModalMessage(result.message || "", !result.ok);
@@ -224,13 +241,58 @@ async function handleCreateAccount(event) {
 
   els.authCreatePassword.value = "";
   els.authCreateConfirm.value = "";
-  if (result.needsEmailConfirmation) {
-    els.authCreateEmail.value = "";
-    els.authCreateName.value = "";
-    return;
-  }
+  els.authClaimCode.value = "";
+  els.authCreateName.value = "";
+  updateClaimPreview(null);
+  clearClaimQueryParam();
   closeAuthModal();
   render();
+}
+
+function handleClaimCodeInput() {
+  if (!els.authClaimCode?.value.trim()) {
+    updateClaimPreview(null);
+    setAuthModalMessage("");
+  }
+}
+
+async function handleClaimCodeChange() {
+  const code = els.authClaimCode?.value.trim() || "";
+  if (!code) {
+    updateClaimPreview(null);
+    return;
+  }
+  await loadClaimPreview(code);
+}
+
+async function loadClaimPreview(code) {
+  const result = await loadClaimableProfile(code);
+  if (!result.ok) {
+    updateClaimPreview(null);
+    setAuthModalMessage(result.message || "Claim code is invalid.", true);
+    return;
+  }
+  updateClaimPreview(result.profile);
+  setAuthModalMessage("");
+}
+
+function updateClaimPreview(profile) {
+  if (els.authClaimPreview) els.authClaimPreview.classList.toggle("hidden", !profile);
+  if (els.authClaimPreviewName) {
+    els.authClaimPreviewName.textContent = profile ? profile.display_name || profile.name || "Player Profile" : "";
+  }
+  if (els.authClaimPreviewUsername) {
+    els.authClaimPreviewUsername.textContent = profile?.login_username ? `Username: ${profile.login_username}` : "";
+  }
+  if (els.authCreateName) els.authCreateName.value = profile?.login_username || "";
+}
+
+function clearClaimQueryParam() {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("claim")) return;
+  url.searchParams.delete("claim");
+  const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+  window.history.replaceState({}, "", nextUrl);
 }
 
 function setAuthModalMessage(message, isError = false) {

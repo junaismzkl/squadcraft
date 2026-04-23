@@ -3,7 +3,7 @@ import { approveUserProfile, authState, canApproveUsers, canManageRoles, isAppro
 import { generateLineupPositions } from "./formation.js?v=match-debug-v5";
 import { clearLiveTimer, renderLiveMatch } from "./liveMatch.js?v=match-debug-v5";
 import { deleteSharedMatch } from "./matchStore.js?v=match-debug-v5";
-import { deactivateProfilePlayer, loadSharedPlayersIntoState, updateProfilePlayerDetails, updateProfilePlayerRole } from "./playerStore.js?v=match-debug-v5";
+import { createClaimableProfile, deactivateProfilePlayer, loadSharedPlayersIntoState, updateProfilePlayerDetails, updateProfilePlayerRole } from "./playerStore.js?v=match-debug-v5";
 import {
   getMatchSettings,
   normalizeCaptains,
@@ -107,6 +107,12 @@ let editingMatchSnapshot = null;
 let originalEditingMatchId = "";
 let hasPendingMatchEdits = false;
 let notificationsOpen = false;
+const claimResultState = {
+  playerName: "",
+  username: "",
+  claimCode: "",
+  claimLink: ""
+};
 const imageDrafts = {
   profile: "",
   player: "",
@@ -300,6 +306,7 @@ export async function openUserManagement() {
 export async function savePlayerFromForm(event) {
   event.preventDefault();
   const name = els.playerName.value.trim();
+  const isGuestPlayer = Boolean(els.playerGuest.checked);
   const positions = getSelectedFormPositions(
     els.playerRole.value,
     els.playerPosition.value,
@@ -335,12 +342,58 @@ export async function savePlayerFromForm(event) {
     return;
   }
 
-  alert("Permanent players now come from approved user profiles. Use Profile Setup to update player details.");
+  if (!canManagePlayers()) {
+    alert("Permanent players now come from approved user profiles. Use Profile Setup to update your player details.");
+    resetPlayerForm();
+    return;
+  }
+
+  if (isGuestPlayer) {
+    alert("Guest players stay temporary per match. Use Add Guest Player during match setup.");
+    resetPlayerForm();
+    return;
+  }
+
+  const result = await createClaimableProfile({
+    name,
+    displayName: name,
+    rating: els.playerRating.value,
+    primaryPosition: positions.primary,
+    secondaryPosition: positions.secondary,
+    thirdPosition: positions.tertiary,
+    dominantFoot: els.playerDominantFoot?.value || "",
+    jerseyNumber: els.playerJerseyNumber?.value || "",
+    avatarUrl: image
+  }, authState.currentProfile);
+
+  if (!result.ok) {
+    alert(result.message || "Could not create claimable profile.");
+    return;
+  }
+
+  showClaimResultModal({
+    playerName: name,
+    username: result.username || result.profile?.login_username || "",
+    claimCode: result.claimCode || "",
+    claimLink: result.claimLink || ""
+  });
+  logActivity("claimable_profile_created", "profile", result.profile.id, { name });
   resetPlayerForm();
+  render();
 }
 
 export function showPlayerForm() {
-  alert("Permanent players now come from approved user profiles. Use Profile Setup to update your player details.");
+  if (!canManagePlayers()) {
+    alert("Permanent players now come from approved user profiles. Use Profile Setup to update your player details.");
+    return;
+  }
+  isPlayerFormVisible = true;
+  resetPlayerForm();
+  isPlayerFormVisible = true;
+  els.playerForm.querySelector(".primary").textContent = "Add Player";
+  syncPlayerFormVisibility();
+  switchTab("players");
+  els.playerName.focus();
 }
 
 export function createPlayer({ name, rating, positions, image = "", isGuest }) {
@@ -964,7 +1017,9 @@ export function renderPlayers() {
 
 function renderPlayersToolbar() {
   if (!els.showPlayerForm?.parentElement) return;
-  els.showPlayerForm.classList.add("hidden");
+  const canShowAddPlayer = canApproveUsers();
+  els.showPlayerForm.classList.toggle("hidden", !canShowAddPlayer);
+  els.showPlayerForm.textContent = "+ Add Player";
   let manageButton = document.querySelector("#toggle-manage-players");
   if (!canManagePlayers()) {
     isManagePlayersMode = false;
@@ -1140,6 +1195,7 @@ export function createPlayerCard(player, options = {}) {
     const rating = clampRating(player.rating);
     const stats = getPlayerStats(player);
     const actionMarkup = cardActionMarkup(player, options);
+    const claimStatusMarkup = getClaimStatusMarkup(player);
     const card = document.createElement("article");
   card.className = "player-card";
   card.innerHTML = `
@@ -1156,6 +1212,7 @@ export function createPlayerCard(player, options = {}) {
             <div class="player-card-identity">
               <strong title="${escapeHtml(player.name)}">${escapeHtml(displayName)}</strong>
               <span class="player-card-position-list">${escapeHtml(positionSummary)}</span>
+              ${claimStatusMarkup}
             </div>
           </div>
         <div class="player-card-body">
@@ -1182,6 +1239,17 @@ export function createPlayerCard(player, options = {}) {
     </div>
   `;
   return card;
+}
+
+function getClaimStatusMarkup(player) {
+  if (!player?.profileBacked || player?.isGuest) return "";
+  if (player.claimStatus === "pending") {
+    return '<span class="player-card-claim-status pending">Pending Claim</span>';
+  }
+  if (player.claimStatus === "claimed") {
+    return '<span class="player-card-claim-status claimed">Claimed</span>';
+  }
+  return "";
 }
 
 export function cardActionMarkup(player, options) {
@@ -1509,11 +1577,68 @@ export function cancelMatchCreation() {
 }
 
 export function initUI() {
+  bindClaimResultModalEvents();
   initTimeSelectors();
   syncMatchWizardStep();
   syncPlayerFormVisibility();
   startMatchStatusRefresh();
   render();
+}
+
+function bindClaimResultModalEvents() {
+  if (!els.claimResultModal) return;
+  els.claimResultClose.onclick = closeClaimResultModal;
+  els.claimCopyUsername.onclick = () => copyClaimResultValue(claimResultState.username, "Username copied.");
+  els.claimCopyCode.onclick = () => copyClaimResultValue(claimResultState.claimCode, "Claim code copied.");
+  els.claimCopyLink.onclick = () => copyClaimResultValue(claimResultState.claimLink, "Claim link copied.");
+  els.claimResultModal.onclick = (event) => {
+    if (event.target === els.claimResultModal) closeClaimResultModal();
+  };
+}
+
+function showClaimResultModal({ playerName = "", username = "", claimCode = "", claimLink = "" } = {}) {
+  claimResultState.playerName = playerName || "";
+  claimResultState.username = username;
+  claimResultState.claimCode = claimCode;
+  claimResultState.claimLink = claimLink;
+  if (els.claimResultPlayerName) els.claimResultPlayerName.textContent = playerName || "-";
+  if (els.claimResultUsername) els.claimResultUsername.textContent = username || "-";
+  if (els.claimResultCode) els.claimResultCode.textContent = claimCode || "-";
+  if (els.claimResultLink) els.claimResultLink.textContent = claimLink || "-";
+  if (els.claimResultFeedback) els.claimResultFeedback.textContent = "";
+  els.claimResultModal?.classList.remove("hidden");
+}
+
+function closeClaimResultModal() {
+  els.claimResultModal?.classList.add("hidden");
+  if (els.claimResultFeedback) els.claimResultFeedback.textContent = "";
+}
+
+async function copyClaimResultValue(value, successMessage) {
+  const text = String(value || "").trim();
+  if (!text) return;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      fallbackCopyText(text);
+    }
+  } catch (error) {
+    fallbackCopyText(text);
+  }
+  if (els.claimResultFeedback) els.claimResultFeedback.textContent = successMessage;
+}
+
+function fallbackCopyText(text) {
+  const input = document.createElement("textarea");
+  input.value = text;
+  input.setAttribute("readonly", "readonly");
+  input.style.position = "fixed";
+  input.style.opacity = "0";
+  document.body.appendChild(input);
+  input.select();
+  document.execCommand("copy");
+  document.body.removeChild(input);
 }
 
 export function startMatchCreation() {
@@ -1928,10 +2053,18 @@ function renderHomeFeedback() {
 
 function syncPlayerFormVisibility() {
   const editingPlayer = state.data.players.find((player) => player.id === els.editingPlayerId.value);
+  const isCreateMode = Boolean(isPlayerFormVisible && !editingPlayer && canManagePlayers());
   const canShowProfileEdit = Boolean(isPlayerFormVisible && editingPlayer?.profileBacked && canEditProfileBackedPlayer(editingPlayer));
-  if (!canShowProfileEdit) isPlayerFormVisible = false;
-  els.playerForm.classList.toggle("hidden", !canShowProfileEdit);
-  els.showPlayerForm.classList.add("hidden");
+  const canShowForm = isCreateMode || canShowProfileEdit;
+  if (!canShowForm) isPlayerFormVisible = false;
+  els.playerForm.classList.toggle("hidden", !canShowForm);
+  const canShowAddPlayer = canApproveUsers();
+  els.showPlayerForm.classList.toggle("hidden", !canShowAddPlayer);
+  if (canShowAddPlayer) {
+    els.showPlayerForm.textContent = isPlayerFormVisible && !editingPlayer ? "Close Add Player" : "+ Add Player";
+  } else {
+    els.showPlayerForm.classList.add("hidden");
+  }
 }
 
 function renderMatchLanding() {
