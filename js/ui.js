@@ -1003,8 +1003,18 @@ export function renderPlayers() {
     return;
   }
 
-  visiblePlayers.sort((a, b) => a.name.localeCompare(b.name)).forEach((player) => {
-    const card = createPlayerCard(player, { actions: isManagePlayersMode && canManagePlayers() ? "manage" : "" });
+  [...visiblePlayers]
+    .sort((a, b) => {
+      const aIsCurrent = isCurrentUsersPlayerCard(a);
+      const bIsCurrent = isCurrentUsersPlayerCard(b);
+      if (aIsCurrent !== bIsCurrent) return aIsCurrent ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    })
+    .forEach((player) => {
+    const card = createPlayerCard(player, {
+      actions: isManagePlayersMode && canManagePlayers() ? "manage" : "",
+      isCurrentUserCard: isCurrentUsersPlayerCard(player)
+    });
     card.querySelector('[data-action="edit"]')?.addEventListener("click", () => editPlayer(player.id));
     card.querySelector('[data-action="delete"]')?.addEventListener("click", () => deletePlayer(player.id));
     card.querySelector('[data-action="deactivate-profile"]')?.addEventListener("click", () => deactivateProfileBackedPlayer(player.id));
@@ -1201,8 +1211,9 @@ export function createPlayerCard(player, options = {}) {
     const stats = getPlayerStats(player);
     const actionMarkup = cardActionMarkup(player, options);
     const claimStatusMarkup = getClaimStatusMarkup(player);
+    const currentUserBadgeMarkup = options.isCurrentUserCard ? '<span class="player-card-self-badge">You</span>' : "";
     const card = document.createElement("article");
-  card.className = "player-card";
+  card.className = `player-card${options.isCurrentUserCard ? " player-card-self" : ""}`;
   card.innerHTML = `
     <div class="player-card-shell">
       <div class="player-card-hero">
@@ -1211,6 +1222,7 @@ export function createPlayerCard(player, options = {}) {
             <span class="player-card-position">${getRoleBadgeLabel(primaryPosition)}</span>
         </div>
           ${player.isGuest ? '<span class="player-card-guest-badge">Guest</span>' : ""}
+          ${currentUserBadgeMarkup}
           <div class="player-card-avatar-wrap">
             <img class="player-photo" src="${player.image || DEFAULT_AVATAR}" alt="${escapeHtml(player.name)} profile photo">
           </div>
@@ -1247,6 +1259,7 @@ export function createPlayerCard(player, options = {}) {
 }
 
 function getClaimStatusMarkup(player) {
+  if (!shouldShowClaimBadge()) return "";
   if (!player?.profileBacked || player?.isGuest) return "";
   if (player.claimStatus === "pending") {
     return '<span class="player-card-claim-status pending">Pending Claim</span>';
@@ -1255,6 +1268,16 @@ function getClaimStatusMarkup(player) {
     return '<span class="player-card-claim-status claimed">Claimed</span>';
   }
   return "";
+}
+
+function shouldShowClaimBadge() {
+  return isManagePlayersMode && canApproveUsers();
+}
+
+function isCurrentUsersPlayerCard(player) {
+  const currentProfileId = String(authState.currentProfile?.id || "").trim();
+  const playerProfileId = String(player?.profileId || player?.id || "").trim();
+  return Boolean(currentProfileId && playerProfileId && currentProfileId === playerProfileId);
 }
 
 export function cardActionMarkup(player, options) {

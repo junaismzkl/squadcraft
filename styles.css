@@ -1938,6 +1938,34 @@ select:focus {
   text-transform: uppercase;
 }
 
+.player-card-self-badge {
+  position: absolute;
+  top: 20px;
+  right: 18px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 5px 10px;
+  color: #111827;
+  background: linear-gradient(135deg, #f8e7a2 0%, #d6bf74 100%);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  box-shadow: 0 10px 24px rgba(214, 191, 116, 0.24);
+}
+
+.player-card-self {
+  border-color: rgba(255, 215, 0, 0.55);
+  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.42), 0 0 0 1px rgba(214, 191, 116, 0.22);
+}
+
+.player-card-self .player-card-hero::after {
+  border-color: rgba(255, 215, 0, 0.28);
+}
+
 .player-card-avatar-wrap {
   position: relative;
   z-index: 1;
