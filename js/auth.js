@@ -244,6 +244,8 @@ export async function saveCurrentProfile({
   const safeDisplayName = String(displayName || "").trim();
   const safePrimaryPosition = normalizePlayerPosition(primaryPosition);
   const playerProfileCompleted = Boolean((safeDisplayName || safeName) && safePrimaryPosition);
+  const shouldKeepClaimedProfileActive = isClaimedAdminCreatedProfile(authState.currentProfile)
+    || authState.currentProfile?.claim_status === "claimed";
   const profilePatch = {
     id: authState.currentProfile?.id || user.id,
     auth_user_id: authState.currentProfile?.auth_user_id || user.id,
@@ -256,10 +258,12 @@ export async function saveCurrentProfile({
     jersey_number: normalizeJerseyNumber(jerseyNumber),
     player_profile_completed: playerProfileCompleted,
     role: authState.currentProfile?.role || "user",
-    is_active: authState.currentProfile?.is_active ?? false,
-    approval_status: authState.currentProfile?.approval_status || "pending",
+    is_active: shouldKeepClaimedProfileActive ? true : (authState.currentProfile?.is_active ?? false),
+    approval_status: shouldKeepClaimedProfileActive ? "approved" : (authState.currentProfile?.approval_status || "pending"),
     claim_status: authState.currentProfile?.claim_status || "claimed",
-    claimed_at: authState.currentProfile?.claimed_at || null,
+    claimed_at: shouldKeepClaimedProfileActive
+      ? (authState.currentProfile?.claimed_at || new Date().toISOString())
+      : (authState.currentProfile?.claimed_at || null),
     login_username: authState.currentProfile?.login_username || null,
     created_by: authState.currentProfile?.created_by || null
   };
@@ -784,7 +788,7 @@ async function applySession(session) {
   let nextProfile = await refreshResolvedProfile(session.user.id, profile);
 
   if (!nextProfile) {
-    if (authState.claimFlowActive) {
+    if (authState.claimFlowActive || isClaimAuthUser(session.user)) {
       clearAuthenticatedProfile();
       authState.currentProfile = null;
       authState.isLoading = false;
@@ -838,4 +842,10 @@ function shouldRetryFreshProfileLoad(profile, userId) {
 
 function delay(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function isClaimAuthUser(user = {}) {
+  const email = String(user?.email || "").trim().toLowerCase();
+  return email.endsWith("@player.squadcraft.local")
+    || Boolean(String(user?.user_metadata?.claim_code || "").trim());
 }
