@@ -774,18 +774,20 @@ async function applySession(session) {
     return;
   }
 
+  authState.isLoading = true;
   authState.currentSession = session;
   authState.currentAuthUser = session.user;
   authState.isAuthenticated = true;
   authState.error = "";
 
   const { profile, error } = await loadCurrentProfile(session.user.id);
-  let nextProfile = profile;
+  let nextProfile = await refreshResolvedProfile(session.user.id, profile);
 
   if (!nextProfile) {
     if (authState.claimFlowActive) {
       clearAuthenticatedProfile();
       authState.currentProfile = null;
+      authState.isLoading = false;
       return;
     }
     console.warn("Authenticated user has no profile row. Creating pending profile.", { userId: session.user.id });
@@ -796,6 +798,7 @@ async function applySession(session) {
       clearAuthenticatedProfile();
       authState.currentProfile = null;
       authState.error = createdProfile.message || error || "Profile missing.";
+      authState.isLoading = false;
       return;
     }
     nextProfile = createdProfile.profile;
@@ -804,6 +807,7 @@ async function applySession(session) {
   authState.currentProfile = nextProfile;
   setAuthenticatedProfile(nextProfile);
   await loadPendingProfiles();
+  authState.isLoading = false;
 }
 
 function applySignedOutState(error = "") {
@@ -812,6 +816,26 @@ function applySignedOutState(error = "") {
   authState.currentProfile = null;
   authState.pendingProfiles = [];
   authState.isAuthenticated = false;
+  authState.isLoading = false;
   authState.error = error;
   clearAuthenticatedProfile();
+}
+
+async function refreshResolvedProfile(userId, profile) {
+  if (!shouldRetryFreshProfileLoad(profile, userId)) return profile;
+  await delay(150);
+  const retry = await loadCurrentProfile(userId);
+  return retry.profile || profile;
+}
+
+function shouldRetryFreshProfileLoad(profile, userId) {
+  if (!profile || !userId) return false;
+  if (isApprovedProfile(profile)) return false;
+  return String(profile.auth_user_id || "").trim() === String(userId || "").trim()
+    || Boolean(String(profile.created_by || "").trim())
+    || Boolean(String(profile.claim_status || "").trim());
+}
+
+function delay(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }

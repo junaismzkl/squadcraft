@@ -273,6 +273,22 @@ function renderAuthState() {
 }
 
 function renderPendingApprovalView() {
+  const isCheckingAccess = authState.isAuthenticated && authState.isLoading;
+  if (isCheckingAccess) {
+    els.authGate?.classList.remove("hidden");
+    els.appMain?.classList.add("hidden");
+    if (els.authGate) {
+      els.authGate.innerHTML = `
+        <article class="auth-gate-card">
+          <p class="eyebrow">Checking Account</p>
+          <h2>Verifying your access...</h2>
+          <p>Loading your latest profile details.</p>
+        </article>
+      `;
+    }
+    return true;
+  }
+
   const shouldGate = authState.isAuthenticated && !isApprovedProfile();
   els.authGate?.classList.toggle("hidden", !shouldGate);
   els.appMain?.classList.toggle("hidden", shouldGate);
