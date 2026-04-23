@@ -704,7 +704,9 @@ function getPlayerIdAliases(player = {}) {
     player.id,
     player.profileId,
     player.profile_id,
-    player.ownerUserId
+    player.ownerUserId,
+    player.authUserId,
+    player.auth_user_id
   ].map((value) => String(value || "").trim()).filter(Boolean);
 }
 
@@ -713,6 +715,7 @@ function getPlayerDebugId(player = {}) {
     id: player.id || "",
     profileId: player.profileId || "",
     ownerUserId: player.ownerUserId || "",
+    authUserId: player.authUserId || player.auth_user_id || "",
     name: player.name || "",
     isGuest: Boolean(player.isGuest)
   };
@@ -827,6 +830,7 @@ function remoteMatchPlayerToLocal(row) {
     image: profile?.avatar_url || "",
     isGuest,
     ownerUserId: row.profile_id || "",
+    authUserId: profile?.auth_user_id || "",
     createdBy: row.created_by || "",
     createdAt: row.created_at,
     approvalStatus: "approved"

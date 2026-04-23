@@ -1208,6 +1208,8 @@ export function createPlayerCard(player, options = {}) {
     const primaryPosition = getPrimaryPosition(player);
     const positionSummary = formatPlayerPositions(player);
     const rating = clampRating(player.rating);
+    const jerseyNumber = String(player.jerseyNumber ?? player.jersey_number ?? "").trim();
+    const visibleCardValueMarkup = getPlayerCardValueMarkup({ rating, jerseyNumber });
     const stats = getPlayerStats(player);
     const actionMarkup = cardActionMarkup(player, options);
     const claimStatusMarkup = getClaimStatusMarkup(player);
@@ -1218,7 +1220,7 @@ export function createPlayerCard(player, options = {}) {
     <div class="player-card-shell">
       <div class="player-card-hero">
         <div class="player-card-rating-block">
-          <strong class="player-card-rating">${rating}</strong>
+          ${visibleCardValueMarkup}
             <span class="player-card-position">${getRoleBadgeLabel(primaryPosition)}</span>
         </div>
           ${player.isGuest ? '<span class="player-card-guest-badge">Guest</span>' : ""}
@@ -1258,6 +1260,16 @@ export function createPlayerCard(player, options = {}) {
   return card;
 }
 
+function getPlayerCardValueMarkup({ rating, jerseyNumber }) {
+  if (shouldShowVisiblePlayerRating()) {
+    return `<strong class="player-card-rating">${rating}</strong>`;
+  }
+  if (jerseyNumber) {
+    return `<strong class="player-card-jersey">#${escapeHtml(jerseyNumber)}</strong>`;
+  }
+  return '<strong class="player-card-neutral" aria-hidden="true">-</strong>';
+}
+
 function getClaimStatusMarkup(player) {
   if (!shouldShowClaimBadge()) return "";
   if (!player?.profileBacked || player?.isGuest) return "";
@@ -1271,6 +1283,10 @@ function getClaimStatusMarkup(player) {
 }
 
 function shouldShowClaimBadge() {
+  return isManagePlayersMode && canApproveUsers();
+}
+
+function shouldShowVisiblePlayerRating() {
   return isManagePlayersMode && canApproveUsers();
 }
 

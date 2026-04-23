@@ -1912,6 +1912,21 @@ select:focus {
   text-shadow: 0 4px 16px rgba(255, 215, 0, 0.18);
 }
 
+.player-card-jersey {
+  font-size: clamp(1.6rem, 6.8vw, 2.35rem);
+  line-height: 0.95;
+  color: #f8e7a2;
+  text-shadow: 0 4px 16px rgba(214, 191, 116, 0.16);
+}
+
+.player-card-neutral {
+  font-size: clamp(1.45rem, 5vw, 1.85rem);
+  line-height: 0.95;
+  color: rgba(248, 231, 162, 0.45);
+  letter-spacing: 0.08em;
+  text-shadow: none;
+}
+
 .player-card-position {
   font-size: 0.78rem;
   font-weight: 900;

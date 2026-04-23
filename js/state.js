@@ -1039,7 +1039,9 @@ function buildMatchPlayerIdentityIdSet(players = []) {
       player?.id,
       player?.profileId,
       player?.profile_id,
-      player?.ownerUserId
+      player?.ownerUserId,
+      player?.authUserId,
+      player?.auth_user_id
     ].forEach((value) => {
       const id = String(value || "").trim();
       if (id) ids.add(id);
@@ -1435,7 +1437,9 @@ function getPlayerIdAliases(player = {}) {
     player.id,
     player.profileId,
     player.profile_id,
-    player.ownerUserId
+    player.ownerUserId,
+    player.authUserId,
+    player.auth_user_id
   ].map((value) => String(value || "").trim()).filter(Boolean);
 }
 
@@ -1465,6 +1469,7 @@ export function snapshotTeam(players) {
       image: player.image || "",
       isGuest: player.isGuest,
       ownerUserId: player.ownerUserId || "",
+      authUserId: player.authUserId || player.auth_user_id || "",
       profileBacked: Boolean(player.profileBacked),
       approvalStatus: player.approvalStatus || "approved",
       assignedPosition: normalizePositionCode(player.assignedPosition),
