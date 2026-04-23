@@ -227,13 +227,18 @@ export function saveMatchResult(event, els) {
 
   const matchPlayers = getCurrentMatchPlayers();
   const persistedMatchPlayers = matchPlayers.filter((player) => !player.isGuest);
-  const persistedPlayerIds = new Set(persistedMatchPlayers.map((player) => player.id));
+  const persistedPlayerIdMap = buildPersistedPlayerIdMap(persistedMatchPlayers);
+  const persistedPlayerIds = new Set([...persistedPlayerIdMap.values()]);
   const result = {
     scoreA: teamAScore,
     scoreB: teamBScore,
-    scorersA: selectedScorers("a").filter((entry) => entry.playerId === OWN_GOAL_ID || persistedPlayerIds.has(entry.playerId)),
-    scorersB: selectedScorers("b").filter((entry) => entry.playerId === OWN_GOAL_ID || persistedPlayerIds.has(entry.playerId)),
-    manOfTheMatch: persistedPlayerIds.has(motmId) ? motmId : ""
+    scorersA: selectedScorers("a")
+      .map((entry) => normalizePersistedScorerEntry(entry, persistedPlayerIdMap))
+      .filter((entry) => entry.playerId === OWN_GOAL_ID || persistedPlayerIds.has(entry.playerId)),
+    scorersB: selectedScorers("b")
+      .map((entry) => normalizePersistedScorerEntry(entry, persistedPlayerIdMap))
+      .filter((entry) => entry.playerId === OWN_GOAL_ID || persistedPlayerIds.has(entry.playerId)),
+    manOfTheMatch: persistedPlayerIdMap.get(motmId) || ""
   };
 
   updateTeams((teams) => ({
@@ -286,6 +291,15 @@ export function saveMatchResult(event, els) {
     manOfTheMatch: result.manOfTheMatch || null
   });
   return true;
+}
+
+function normalizePersistedScorerEntry(entry = {}, persistedPlayerIdMap = new Map()) {
+  const playerId = String(entry.playerId || "").trim();
+  if (playerId === OWN_GOAL_ID) return { ...entry, playerId };
+  return {
+    ...entry,
+    playerId: persistedPlayerIdMap.get(playerId) || playerId
+  };
 }
 
 export function addLiveGoal(teamKey, playerId) {
@@ -438,6 +452,27 @@ function getPlayerIdAliases(player = {}) {
     player.authUserId,
     player.auth_user_id
   ].map((value) => String(value || "").trim()).filter(Boolean);
+}
+
+function buildPersistedPlayerIdMap(players = []) {
+  const aliasMap = new Map();
+  players.forEach((player) => {
+    const canonicalId = getCanonicalPersistedPlayerId(player);
+    if (!canonicalId) return;
+    getPlayerIdAliases(player).forEach((alias) => {
+      if (alias && !aliasMap.has(alias)) aliasMap.set(alias, canonicalId);
+    });
+  });
+  return aliasMap;
+}
+
+function getCanonicalPersistedPlayerId(player = {}) {
+  return [
+    player.profileId,
+    player.profile_id,
+    player.id,
+    player.ownerUserId
+  ].map((value) => String(value || "").trim()).find(Boolean) || "";
 }
 
 function getScorerEntries(teamKey) {
