@@ -1243,11 +1243,16 @@ function applyDerivedStatsToPlayers(players = [], matches = [], source = "") {
     ...player,
     stats: {
       ...createDefaultPlayerStats(),
-      ...(statsByPlayerId[player.id] || {})
+      ...resolveDerivedStatsForPlayer(player, statsByPlayerId)
     }
   }));
   logDerivedStatsRecompute(source, dedupedMatches, nextPlayers, statsByPlayerId);
   return nextPlayers;
+}
+
+function resolveDerivedStatsForPlayer(player = {}, statsByPlayerId = {}) {
+  const matchedAlias = getPlayerIdAliases(player).find((alias) => statsByPlayerId[alias]);
+  return matchedAlias ? statsByPlayerId[matchedAlias] || {} : {};
 }
 
 function getStatsResetTime() {
