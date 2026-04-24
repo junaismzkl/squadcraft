@@ -3,7 +3,7 @@ import { approveUserProfile, authState, canApproveUsers, canManageRoles, isAppro
 import { generateLineupPositions } from "./formation.js?v=match-debug-v5";
 import { clearLiveTimer, renderLiveMatch } from "./liveMatch.js?v=match-debug-v5";
 import { deleteSharedMatch } from "./matchStore.js?v=match-debug-v5";
-import { createClaimableProfile, deactivateProfilePlayer, loadSharedPlayersIntoState, updateProfilePlayerDetails, updateProfilePlayerRole } from "./playerStore.js?v=match-debug-v5";
+import { createClaimableProfile, deactivateProfilePlayer, loadSharedPlayersIntoState, regenerateProfileClaimLink, updateProfilePlayerDetails, updateProfilePlayerRole } from "./playerStore.js?v=match-debug-v5";
 import {
   getMatchSettings,
   normalizeCaptains,
@@ -110,7 +110,6 @@ let notificationsOpen = false;
 const claimResultState = {
   playerName: "",
   username: "",
-  claimCode: "",
   claimLink: ""
 };
 const imageDrafts = {
@@ -395,7 +394,6 @@ export async function savePlayerFromForm(event) {
   showClaimResultModal({
     playerName: name,
     username: result.username || result.profile?.login_username || "",
-    claimCode: result.claimCode || "",
     claimLink: result.claimLink || ""
   });
   logActivity("claimable_profile_created", "profile", result.profile.id, { name });
@@ -587,6 +585,35 @@ async function deactivateProfileBackedPlayer(playerId) {
   }
   removeSelectedPlayerId(player.id);
   logActivity("profile_player_deactivated", "profile", player.profileId || player.id, { name: player.name });
+  render();
+}
+
+async function copyProfileClaimLink(playerId) {
+  const player = state.data.players.find((item) => item.id === playerId);
+  if (!player?.profileBacked || player?.isGuest || player.claimStatus !== "pending") return;
+  const claimLink = buildProfileClaimLink(player.claimCode);
+  if (!claimLink) {
+    alert("No active claim link is available for this player.");
+    return;
+  }
+  await copyTextValue(claimLink);
+  alert("Claim link copied.");
+}
+
+async function regeneratePendingProfileClaimLink(playerId) {
+  const player = state.data.players.find((item) => item.id === playerId);
+  if (!player?.profileBacked || player?.isGuest || player.claimStatus !== "pending") return;
+  const confirmed = confirm(`Generate a new claim link for ${player.name}? The previous pending link will stop working.`);
+  if (!confirmed) return;
+
+  const result = await regenerateProfileClaimLink(player.profileId || player.id);
+  if (!result.ok) {
+    alert(result.message || "Could not regenerate claim link.");
+    return;
+  }
+
+  await copyTextValue(result.claimLink || "");
+  alert("New claim link generated and copied.");
   render();
 }
 
@@ -1034,6 +1061,8 @@ export function renderPlayers() {
     card.querySelector('[data-action="edit"]')?.addEventListener("click", () => editPlayer(player.id));
     card.querySelector('[data-action="delete"]')?.addEventListener("click", () => deletePlayer(player.id));
     card.querySelector('[data-action="deactivate-profile"]')?.addEventListener("click", () => deactivateProfileBackedPlayer(player.id));
+    card.querySelector('[data-action="copy-claim-link"]')?.addEventListener("click", () => copyProfileClaimLink(player.id));
+    card.querySelector('[data-action="regenerate-claim-link"]')?.addEventListener("click", () => regeneratePendingProfileClaimLink(player.id));
     card.querySelector("[data-profile-role]")?.addEventListener("change", (event) => changeProfileBackedPlayerRole(player.id, event.target.value));
     card.querySelector('[data-action="approve"]')?.addEventListener("click", () => approvePlayer(player.id));
     els.playersList.appendChild(card);
@@ -1312,6 +1341,7 @@ export function cardActionMarkup(player, options) {
   if (options.actions === "manage") {
     if (player.profileBacked) {
       const actions = [];
+      const claimActions = getProfileClaimAdminActions(player);
       if (canEditProfileBackedPlayer(player)) {
         actions.push('<button class="icon-button" type="button" data-action="edit">Edit Details</button>');
       }
@@ -1324,6 +1354,7 @@ export function cardActionMarkup(player, options) {
         `);
         actions.push('<button class="icon-button delete" type="button" data-action="deactivate-profile">Deactivate</button>');
       }
+      actions.push(...claimActions);
       if (!actions.length) return "";
       return `
         <div class="row-actions player-card-actions">
@@ -1355,6 +1386,22 @@ export function cardActionMarkup(player, options) {
   }
 
   return "";
+}
+
+function getProfileClaimAdminActions(player) {
+  if (!canApproveUsers() || !isManagePlayersMode || !player?.profileBacked || player?.isGuest) return [];
+  if (player.claimStatus === "pending") {
+    return [
+      '<button class="icon-button" type="button" data-action="copy-claim-link">Copy Claim Link</button>',
+      '<button class="icon-button" type="button" data-action="regenerate-claim-link">Regenerate Claim Link</button>'
+    ];
+  }
+  if (player.claimStatus === "claimed") {
+    return [
+      '<button class="icon-button" type="button" data-action="recovery-link" disabled title="Requires a dedicated secure backend reset flow for the existing claimed account.">Reset Login Link</button>'
+    ];
+  }
+  return [];
 }
 
 export function renderMatchSelection() {
@@ -1645,21 +1692,18 @@ function bindClaimResultModalEvents() {
   if (!els.claimResultModal) return;
   els.claimResultClose.onclick = closeClaimResultModal;
   els.claimCopyUsername.onclick = () => copyClaimResultValue(claimResultState.username, "Username copied.");
-  els.claimCopyCode.onclick = () => copyClaimResultValue(claimResultState.claimCode, "Claim code copied.");
   els.claimCopyLink.onclick = () => copyClaimResultValue(claimResultState.claimLink, "Claim link copied.");
   els.claimResultModal.onclick = (event) => {
     if (event.target === els.claimResultModal) closeClaimResultModal();
   };
 }
 
-function showClaimResultModal({ playerName = "", username = "", claimCode = "", claimLink = "" } = {}) {
+function showClaimResultModal({ playerName = "", username = "", claimLink = "" } = {}) {
   claimResultState.playerName = playerName || "";
   claimResultState.username = username;
-  claimResultState.claimCode = claimCode;
   claimResultState.claimLink = claimLink;
   if (els.claimResultPlayerName) els.claimResultPlayerName.textContent = playerName || "-";
   if (els.claimResultUsername) els.claimResultUsername.textContent = username || "-";
-  if (els.claimResultCode) els.claimResultCode.textContent = claimCode || "-";
   if (els.claimResultLink) els.claimResultLink.textContent = claimLink || "-";
   if (els.claimResultFeedback) els.claimResultFeedback.textContent = "";
   els.claimResultModal?.classList.remove("hidden");
@@ -1673,16 +1717,26 @@ function closeClaimResultModal() {
 async function copyClaimResultValue(value, successMessage) {
   const text = String(value || "").trim();
   if (!text) return;
+  await copyTextValue(text);
+  if (els.claimResultFeedback) els.claimResultFeedback.textContent = successMessage;
+}
+
+async function copyTextValue(text) {
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text);
-    } else {
-      fallbackCopyText(text);
+      return;
     }
+    fallbackCopyText(text);
   } catch (error) {
     fallbackCopyText(text);
   }
-  if (els.claimResultFeedback) els.claimResultFeedback.textContent = successMessage;
+}
+
+function buildProfileClaimLink(claimCode) {
+  const safeClaimCode = String(claimCode || "").trim();
+  if (!safeClaimCode) return "";
+  return `${window.location.origin}${window.location.pathname}?claim=${encodeURIComponent(safeClaimCode)}`;
 }
 
 function fallbackCopyText(text) {

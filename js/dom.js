@@ -144,11 +144,9 @@ export const els = {
   claimResultModal: document.querySelector("#claim-result-modal"),
   claimResultPlayerName: document.querySelector("#claim-result-player-name"),
   claimResultUsername: document.querySelector("#claim-result-username"),
-  claimResultCode: document.querySelector("#claim-result-code"),
   claimResultLink: document.querySelector("#claim-result-link"),
   claimResultFeedback: document.querySelector("#claim-result-feedback"),
   claimCopyUsername: document.querySelector("#claim-copy-username"),
-  claimCopyCode: document.querySelector("#claim-copy-code"),
   claimCopyLink: document.querySelector("#claim-copy-link"),
   claimResultClose: document.querySelector("#claim-result-close")
 };

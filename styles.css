@@ -1364,6 +1364,7 @@ select:focus {
   display: grid;
   gap: 16px;
   text-align: left;
+  padding-bottom: max(24px, env(safe-area-inset-bottom, 0px) + 18px);
 }
 
 .claim-result-grid {

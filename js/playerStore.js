@@ -1,7 +1,7 @@
 import { supabase } from "./supabaseClient.js?v=match-debug-v5";
 import { normalizePlayerRecord, setPlayers, state } from "./state.js?v=match-debug-v5";
 
-const PROFILE_PLAYER_FIELDS = "id,name,display_name,avatar_url,role,is_active,approval_status,approved_by,approved_at,created_at,updated_at,primary_position,secondary_position,third_position,player_profile_completed,rating,dominant_foot,jersey_number,created_by,claim_status,claimed_at,auth_user_id,login_username";
+const PROFILE_PLAYER_FIELDS = "id,name,display_name,avatar_url,role,is_active,approval_status,approved_by,approved_at,created_at,updated_at,primary_position,secondary_position,third_position,player_profile_completed,rating,dominant_foot,jersey_number,created_by,claim_status,claim_code,claimed_at,auth_user_id,login_username";
 
 export async function loadSharedPlayersIntoState() {
   const baseQuery = supabase
@@ -155,6 +155,41 @@ export async function deactivateProfilePlayer(profileId) {
   return { ok: true, profile: data };
 }
 
+export async function regenerateProfileClaimLink(profileId) {
+  if (!profileId) return { ok: false, message: "Player profile id is missing." };
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const claimCode = generateClaimCode();
+    const { data, error } = await supabase
+      .from("profiles")
+      .update({
+        claim_code: claimCode,
+        claim_status: "pending",
+        claimed_at: null,
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", profileId)
+      .select("*")
+      .single();
+
+    if (error) {
+      if (isClaimIdentityConflict(error)) continue;
+      console.warn("Could not regenerate claim link.", error);
+      return { ok: false, message: error.message };
+    }
+
+    await loadSharedPlayersIntoState();
+    return {
+      ok: true,
+      profile: data,
+      claimCode,
+      claimLink: `${window.location.origin}${window.location.pathname}?claim=${encodeURIComponent(claimCode)}`
+    };
+  }
+
+  return { ok: false, message: "Could not generate a new claim link. Please try again." };
+}
+
 function profileToPlayer(profile) {
   const name = profile.display_name || profile.name || "Approved Player";
   return normalizePlayerRecord({
@@ -186,6 +221,7 @@ function profileToPlayer(profile) {
     profileBacked: true,
     profileRole: profile.role || "user",
     claimStatus: profile.claim_status || "claimed",
+    claimCode: profile.claim_code || "",
     loginUsername: profile.login_username || ""
   });
 }
