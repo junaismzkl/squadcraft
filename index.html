@@ -135,6 +135,16 @@
           <p class="helper" id="auth-profile-message">Role is controlled by admins. Add a display name and primary position to complete your player profile.</p>
           <button class="primary" id="auth-profile-save" type="submit">Save Profile</button>
         </form>
+        <form class="auth-form password-change-form hidden" id="auth-password-form">
+          <div class="password-change-heading">
+            <p class="eyebrow">Security</p>
+            <h4>Change Password</h4>
+          </div>
+          <label>New password <input id="auth-new-password" type="password" autocomplete="new-password"></label>
+          <label>Confirm new password <input id="auth-confirm-password" type="password" autocomplete="new-password"></label>
+          <p class="helper" id="auth-password-message">Use at least 8 characters.</p>
+          <button class="secondary" id="auth-password-save" type="submit">Update Password</button>
+        </form>
       </div>
     </div>
 

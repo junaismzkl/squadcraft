@@ -1,5 +1,5 @@
 import { els } from "./dom.js?v=match-debug-v5";
-import { authState, createAccountWithEmailPassword, loadClaimableProfile, saveCurrentProfile, signInWithEmailPassword, signOutCurrentUser } from "./auth.js?v=match-debug-v5";
+import { authState, createAccountWithEmailPassword, loadClaimableProfile, saveCurrentProfile, signInWithEmailPassword, signOutCurrentUser, updateCurrentUserPassword } from "./auth.js?v=match-debug-v5";
 import { loadSharedMatchesIntoState } from "./matchStore.js?v=match-debug-v5";
 import { generateTeams, getMatchSettings, toggleSelectAllPlayers } from "./match.js?v=match-debug-v5";
 import { loadSharedPlayersIntoState } from "./playerStore.js?v=match-debug-v5";
@@ -53,6 +53,7 @@ export function bindEvents() {
   els.authClaimCode?.addEventListener("change", handleClaimCodeChange);
   els.authClaimCode?.addEventListener("input", handleClaimCodeInput);
   els.authProfileForm?.addEventListener("submit", handleProfileSave);
+  els.authPasswordForm?.addEventListener("submit", handlePasswordChange);
   els.authProfileAvatar?.addEventListener("change", handleProfileAvatarChange);
   els.authProfileAvatarChange?.addEventListener("click", () => triggerImageUpload("profile"));
   els.authProfileAvatarRemove?.addEventListener("click", () => {
@@ -166,6 +167,7 @@ function openAuthModal(mode) {
   els.authSignInForm.classList.toggle("hidden", mode !== "sign_in");
   els.authCreateForm.classList.toggle("hidden", mode !== "create_account");
   els.authProfileForm.classList.toggle("hidden", mode !== "profile");
+  els.authPasswordForm?.classList.toggle("hidden", mode !== "profile");
   els.authModalTitle.textContent = mode === "create_account" ? "Claim Profile" : mode === "profile" ? "Profile Setup" : "Sign In";
   if (mode === "create_account" && els.authClaimCode && !els.authClaimCode.value) {
     const claimCode = new URLSearchParams(window.location.search).get("claim");
@@ -347,6 +349,34 @@ async function handleProfileAvatarChange(event) {
   if (draft) setProfileMessage("Profile image ready to save.");
 }
 
+async function handlePasswordChange(event) {
+  event.preventDefault();
+  const password = els.authNewPassword?.value || "";
+  const confirmPassword = els.authConfirmPassword?.value || "";
+
+  if (password.length < 8) {
+    setPasswordMessage("Password must be at least 8 characters.", true);
+    return;
+  }
+  if (password !== confirmPassword) {
+    setPasswordMessage("Passwords do not match.", true);
+    return;
+  }
+
+  els.authPasswordSave.disabled = true;
+  const result = await updateCurrentUserPassword(password);
+  els.authPasswordSave.disabled = false;
+
+  if (!result.ok) {
+    setPasswordMessage(result.message || "Could not update password.", true);
+    return;
+  }
+
+  if (els.authNewPassword) els.authNewPassword.value = "";
+  if (els.authConfirmPassword) els.authConfirmPassword.value = "";
+  setPasswordMessage(result.message || "Password updated successfully");
+}
+
 function populateProfileForm() {
   const profile = authState.currentProfile || {};
   const email = authState.currentAuthUser?.email || "";
@@ -368,14 +398,23 @@ function populateProfileForm() {
   if (els.authProfileAvatarPreview) {
     els.authProfileAvatarPreview.src = avatar || createProfilePlaceholder(profile.name || profile.login_username || email || "User");
   }
+  if (els.authNewPassword) els.authNewPassword.value = "";
+  if (els.authConfirmPassword) els.authConfirmPassword.value = "";
   setImageUploadValue("profile", avatar);
   setProfileMessage("Role is controlled by admins. Add a display name and primary position to complete your player profile.");
+  setPasswordMessage("Use at least 8 characters.");
 }
 
 function setProfileMessage(message, isError = false) {
   if (!els.authProfileMessage) return;
   els.authProfileMessage.textContent = message;
   els.authProfileMessage.classList.toggle("error", isError);
+}
+
+function setPasswordMessage(message, isError = false) {
+  if (!els.authPasswordMessage) return;
+  els.authPasswordMessage.textContent = message;
+  els.authPasswordMessage.classList.toggle("error", isError);
 }
 
 function formatRoleLabel(role) {

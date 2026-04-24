@@ -90,7 +90,6 @@ import {
 } from "./state.js?v=match-debug-v5";
 import { balanceLabel, goalkeeperNote, regenerateTeamLineup, teamRating } from "./teamGenerator.js?v=match-debug-v5";
 import { clampRating, escapeHtml, formatDate, readFileAsDataUrl, resizeImageDataUrl } from "./utils.js?v=match-debug-v5";
-import { supabase } from "./supabaseClient.js?v=match-debug-v5";
 
 let matchStatusRefreshId = null;
 let matchWizardStep = 0;
@@ -624,32 +623,6 @@ async function regeneratePendingProfileClaimLink(playerId) {
   render();
 }
 
-async function generateProfileHandoverLink(playerId) {
-  const player = state.data.players.find((item) => item.id === playerId);
-  if (!player?.profileBacked || player?.isGuest || player.claimStatus !== "claimed" || !player.authUserId) return;
-
-  const { data, error } = await supabase.functions.invoke("generate-handover-link", {
-    body: { profile_id: player.profileId || player.id }
-  });
-
-  if (error) {
-    alert(error.message || "Could not generate handover link.");
-    return;
-  }
-
-  showClaimResultModal({
-    eyebrow: "Account Handover",
-    title: "Handover Link Ready",
-    description: "Share this link with the player so they can access the same existing account and set a new password.",
-    playerName: data?.player_name || player.name || "",
-    username: data?.username || player.loginUsername || "",
-    claimLink: data?.handover_link || "",
-    claimLinkLabel: "Handover Link",
-    copyLinkLabel: "Copy Handover Link",
-    expiry: data?.expires_at ? formatHandoverExpiry(data.expires_at) : ""
-  });
-}
-
 export async function approvePlayer(id) {
   if (!canApprovePlayer()) {
     alert("You do not have permission to approve players.");
@@ -1096,7 +1069,6 @@ export function renderPlayers() {
     card.querySelector('[data-action="deactivate-profile"]')?.addEventListener("click", () => deactivateProfileBackedPlayer(player.id));
     card.querySelector('[data-action="copy-claim-link"]')?.addEventListener("click", () => copyProfileClaimLink(player.id));
     card.querySelector('[data-action="regenerate-claim-link"]')?.addEventListener("click", () => regeneratePendingProfileClaimLink(player.id));
-    card.querySelector('[data-action="generate-handover-link"]')?.addEventListener("click", () => generateProfileHandoverLink(player.id));
     card.querySelector("[data-profile-role]")?.addEventListener("change", (event) => changeProfileBackedPlayerRole(player.id, event.target.value));
     card.querySelector('[data-action="approve"]')?.addEventListener("click", () => approvePlayer(player.id));
     els.playersList.appendChild(card);
@@ -1428,11 +1400,6 @@ function getProfileClaimAdminActions(player) {
     return [
       '<button class="icon-button" type="button" data-action="copy-claim-link">Copy Claim Link</button>',
       '<button class="icon-button" type="button" data-action="regenerate-claim-link">Regenerate Claim Link</button>'
-    ];
-  }
-  if (player.claimStatus === "claimed" && player.authUserId) {
-    return [
-      '<button class="icon-button" type="button" data-action="generate-handover-link">Generate Handover Link</button>'
     ];
   }
   return [];
@@ -1793,12 +1760,6 @@ function buildProfileClaimLink(claimCode) {
   const safeClaimCode = String(claimCode || "").trim();
   if (!safeClaimCode) return "";
   return `${window.location.origin}${window.location.pathname}?claim=${encodeURIComponent(safeClaimCode)}`;
-}
-
-function formatHandoverExpiry(value) {
-  const date = new Date(value || "");
-  if (Number.isNaN(date.getTime())) return String(value || "");
-  return date.toLocaleString();
 }
 
 function fallbackCopyText(text) {

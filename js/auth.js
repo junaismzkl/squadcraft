@@ -226,6 +226,22 @@ export async function signOutCurrentUser() {
   return { ok: true };
 }
 
+export async function updateCurrentUserPassword(password) {
+  if (!authState.currentAuthUser?.id) return { ok: false, message: "Sign in before changing your password." };
+
+  const safePassword = String(password || "");
+  if (safePassword.length < 8) return { ok: false, message: "Password must be at least 8 characters." };
+
+  authState.error = "";
+  const { error } = await supabase.auth.updateUser({ password: safePassword });
+  if (error) {
+    authState.error = error.message || "Could not update password.";
+    return { ok: false, message: authState.error };
+  }
+
+  return { ok: true, message: "Password updated successfully" };
+}
+
 export async function saveCurrentProfile({
   name,
   displayName,

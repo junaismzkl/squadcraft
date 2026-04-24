@@ -491,6 +491,31 @@ main {
   color: #fca5a5;
 }
 
+.password-change-form {
+  margin-top: 4px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(214, 191, 116, 0.14);
+}
+
+.password-change-heading {
+  display: grid;
+  gap: 2px;
+}
+
+.password-change-heading .eyebrow,
+.password-change-heading h4 {
+  margin: 0;
+}
+
+.password-change-heading h4 {
+  color: #f8fafc;
+  font-size: 1rem;
+}
+
+#auth-password-message.error {
+  color: #fca5a5;
+}
+
 .app-title {
   margin: 0;
   font-size: 26px;
