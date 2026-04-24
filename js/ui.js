@@ -1396,11 +1396,6 @@ function getProfileClaimAdminActions(player) {
       '<button class="icon-button" type="button" data-action="regenerate-claim-link">Regenerate Claim Link</button>'
     ];
   }
-  if (player.claimStatus === "claimed") {
-    return [
-      '<button class="icon-button" type="button" data-action="recovery-link" disabled title="Requires a dedicated secure backend reset flow for the existing claimed account.">Reset Login Link</button>'
-    ];
-  }
   return [];
 }
 
