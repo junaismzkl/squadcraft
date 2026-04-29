@@ -12,6 +12,7 @@ import {
   goToMatchLandingStep,
   goToMatchTimeStep,
   goToPlayerSelectionStep,
+  getVisibleMatchSelectionPlayerIds,
   getMatchGenerationOptions,
   getImageUploadDraft,
   handleImageUploadChange,
@@ -27,6 +28,8 @@ import {
   resetPlayerForm,
   savePlayerFromForm,
   setImageUploadValue,
+  setMatchPlayerPositionFilter,
+  setMatchPlayerSearch,
   setActiveStatsTab,
   showPlayerForm,
   startMatchCreation,
@@ -91,8 +94,18 @@ export function bindEvents() {
     });
   els.matchEndPlus30.addEventListener("click", () => handleQuickEndTimeAdjust(30));
   els.matchEndPlus60.addEventListener("click", () => handleQuickEndTimeAdjust(60));
+  els.matchPlayerSearch?.addEventListener("input", () => {
+    setMatchPlayerSearch(els.matchPlayerSearch.value);
+    renderMatchSection();
+  });
+  els.matchPlayerFilters?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-match-player-filter]");
+    if (!button) return;
+    setMatchPlayerPositionFilter(button.dataset.matchPlayerFilter);
+    renderMatchSection();
+  });
   els.selectAllPlayers.addEventListener("click", () => {
-    toggleSelectAllPlayers();
+    toggleSelectAllPlayers(getVisibleMatchSelectionPlayerIds());
     render();
   });
   els.generateTeams.addEventListener("click", () => handleGenerateTeams(false));

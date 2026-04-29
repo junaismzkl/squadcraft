@@ -27,11 +27,18 @@ export function updateFormationOptions() {
   if (state.currentTeams) normalizeTeamFormations();
 }
 
-export function toggleSelectAllPlayers() {
-  const selectablePlayers = state.data.players.filter((player) => player.approvalStatus === "approved");
+export function toggleSelectAllPlayers(playerIds = null) {
+  const visibleIds = Array.isArray(playerIds) ? new Set(playerIds) : null;
+  const selectablePlayers = state.data.players.filter((player) =>
+    player.approvalStatus === "approved" && (!visibleIds || visibleIds.has(player.id))
+  );
   const allSelected =
     selectablePlayers.length > 0 && selectablePlayers.every((player) => state.selectedPlayerIds.has(player.id));
-  setSelectedPlayerIds(allSelected ? [] : selectablePlayers.map((player) => player.id));
+  const selectableIds = new Set(selectablePlayers.map((player) => player.id));
+  const nextIds = allSelected
+    ? [...state.selectedPlayerIds].filter((id) => !selectableIds.has(id))
+    : [...new Set([...state.selectedPlayerIds, ...selectableIds])];
+  setSelectedPlayerIds(nextIds);
   clearTeams();
   updateFormationOptions();
 }

@@ -107,6 +107,10 @@ let editingMatchSnapshot = null;
 let originalEditingMatchId = "";
 let hasPendingMatchEdits = false;
 let notificationsOpen = false;
+let matchPlayerSearchText = "";
+let matchPlayerPositionFilter = "All";
+let visibleMatchSelectionPlayerIds = [];
+const MATCH_PLAYER_FILTERS = ["All", "GK", "CB", "WB", "CM", "WF", "CF", "Selected"];
 const claimResultState = {
   eyebrow: "Player Created",
   title: "Claim Details Ready",
@@ -1409,40 +1413,52 @@ export function renderMatchSelection() {
   els.matchPlayerList.innerHTML = "";
   const approvedPlayers = getVisiblePlayersForCurrentUser();
   if (!approvedPlayers.length && !state.matchGuestPlayers.length) {
+    visibleMatchSelectionPlayerIds = [];
+    renderMatchPlayerControls([]);
     els.matchPlayerList.appendChild(emptyState("No selectable players", "Add players first, then come back to create a match."));
     return;
   }
 
-  approvedPlayers
-    .sort((a, b) => clampRating(b.rating) - clampRating(a.rating) || a.name.localeCompare(b.name))
-    .forEach((player) => {
-          const rating = clampRating(player.rating);
-          const label = document.createElement("label");
-          label.className = "select-player";
-          label.innerHTML = `
-            <input type="checkbox" ${state.selectedPlayerIds.has(player.id) ? "checked" : ""}>
-            <span>${escapeHtml(player.name)} - ${escapeHtml(formatPlayerPositions(player))} - ${rating}</span>
-          `;
-        label.querySelector("input").addEventListener("change", (changeEvent) => {
-          if (changeEvent.target.checked) addSelectedPlayerId(player.id);
-          else removeSelectedPlayerId(player.id);
-  clearTeams();
-  updateFormationOptions();
-  clearManualSwapSelection();
-  renderMatchSection();
-        });
-        els.matchPlayerList.appendChild(label);
-      });
+  const sortedApprovedPlayers = approvedPlayers
+    .sort((a, b) => clampRating(b.rating) - clampRating(a.rating) || a.name.localeCompare(b.name));
+  const visibleApprovedPlayers = sortedApprovedPlayers.filter((player) => matchSelectionPlayerMatches(player, {
+    selected: state.selectedPlayerIds.has(player.id)
+  }));
+  const visibleGuestPlayers = state.matchGuestPlayers.filter((player) => matchSelectionPlayerMatches(player, {
+    selected: true
+  }));
 
-  state.matchGuestPlayers.forEach((player) => {
-      const rating = clampRating(player.rating);
-      const row = document.createElement("div");
-      row.className = "select-player select-player-guest";
-      row.innerHTML = `
-        <span class="select-player-text">${escapeHtml(player.name)} - ${escapeHtml(formatPlayerPositions(player))} - ${rating}</span>
-        <span class="select-player-guest-badge" aria-label="Guest player">Guest</span>
-        <button class="icon-button delete compact-button" type="button">Remove</button>
-      `;
+  visibleMatchSelectionPlayerIds = visibleApprovedPlayers.map((player) => player.id);
+  renderMatchPlayerControls(visibleApprovedPlayers);
+
+  visibleApprovedPlayers.forEach((player) => {
+    const rating = clampRating(player.rating);
+    const label = document.createElement("label");
+    label.className = "select-player";
+    label.innerHTML = `
+      <input type="checkbox" ${state.selectedPlayerIds.has(player.id) ? "checked" : ""}>
+      <span>${escapeHtml(player.name)} - ${escapeHtml(formatPlayerPositions(player))} - ${rating}</span>
+    `;
+    label.querySelector("input").addEventListener("change", (changeEvent) => {
+      if (changeEvent.target.checked) addSelectedPlayerId(player.id);
+      else removeSelectedPlayerId(player.id);
+      clearTeams();
+      updateFormationOptions();
+      clearManualSwapSelection();
+      renderMatchSection();
+    });
+    els.matchPlayerList.appendChild(label);
+  });
+
+  visibleGuestPlayers.forEach((player) => {
+    const rating = clampRating(player.rating);
+    const row = document.createElement("div");
+    row.className = "select-player select-player-guest";
+    row.innerHTML = `
+      <span class="select-player-text">${escapeHtml(player.name)} - ${escapeHtml(formatPlayerPositions(player))} - ${rating}</span>
+      <span class="select-player-guest-badge" aria-label="Guest player">Guest</span>
+      <button class="icon-button delete compact-button" type="button">Remove</button>
+    `;
     row.querySelector("button").addEventListener("click", () => {
       removeMatchGuestPlayer(player.id);
       clearTeams();
@@ -1452,7 +1468,80 @@ export function renderMatchSelection() {
     els.matchPlayerList.appendChild(row);
   });
 
+  if (!visibleApprovedPlayers.length && !visibleGuestPlayers.length) {
+    els.matchPlayerList.appendChild(emptyState("No players found", "Try another name or position."));
+  }
+
   updateFormationOptions();
+}
+
+function renderMatchPlayerControls(visibleApprovedPlayers) {
+  if (els.matchPlayerSearch && els.matchPlayerSearch.value !== matchPlayerSearchText) {
+    els.matchPlayerSearch.value = matchPlayerSearchText;
+  }
+
+  els.matchPlayerFilters?.querySelectorAll("[data-match-player-filter]").forEach((button) => {
+    const isActive = button.dataset.matchPlayerFilter === matchPlayerPositionFilter;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+  });
+
+  renderSelectedPlayerSummary();
+
+  const allVisibleSelected = visibleApprovedPlayers.length > 0
+    && visibleApprovedPlayers.every((player) => state.selectedPlayerIds.has(player.id));
+  els.selectAllPlayers.textContent = allVisibleSelected ? "Clear Visible" : "Select All";
+  els.selectAllPlayers.disabled = visibleApprovedPlayers.length === 0;
+}
+
+function renderSelectedPlayerSummary() {
+  if (!els.selectedPlayerSummary) return;
+  const selectedPlayers = getVisiblePlayersForCurrentUser()
+    .filter((player) => state.selectedPlayerIds.has(player.id))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  els.selectedPlayerSummary.innerHTML = `
+    <div class="selected-player-summary-header">Selected Players: ${selectedPlayers.length}</div>
+    <div class="selected-player-chips"></div>
+  `;
+  const chipList = els.selectedPlayerSummary.querySelector(".selected-player-chips");
+  selectedPlayers.forEach((player) => {
+    const chip = document.createElement("span");
+    chip.className = "selected-player-chip";
+    chip.innerHTML = `
+      <span>${escapeHtml(player.name)} <small>${escapeHtml(getPrimaryPosition(player))}</small></span>
+      <button type="button" aria-label="Remove ${escapeHtml(player.name)}">&times;</button>
+    `;
+    chip.querySelector("button").addEventListener("click", () => {
+      removeSelectedPlayerId(player.id);
+      clearTeams();
+      updateFormationOptions();
+      clearManualSwapSelection();
+      renderMatchSection();
+    });
+    chipList.appendChild(chip);
+  });
+}
+
+function matchSelectionPlayerMatches(player, options = {}) {
+  const selected = Boolean(options.selected);
+  const searchablePositions = getMatchSelectionFilterPositions(player);
+  if (matchPlayerPositionFilter === "Selected" && !selected) return false;
+  if (!["All", "Selected"].includes(matchPlayerPositionFilter) && !searchablePositions.includes(matchPlayerPositionFilter)) {
+    return false;
+  }
+
+  const query = matchPlayerSearchText.trim().toLowerCase();
+  if (!query) return true;
+  const searchableText = [
+    player.name,
+    ...searchablePositions,
+    clampRating(player.rating)
+  ].join(" ").toLowerCase();
+  return searchableText.includes(query);
+}
+
+function getMatchSelectionFilterPositions(player) {
+  return getPlayerPositions(player).slice(0, 2);
 }
 
 export function renderTeams() {
@@ -1754,6 +1843,18 @@ async function copyTextValue(text) {
   } catch (error) {
     fallbackCopyText(text);
   }
+}
+
+export function setMatchPlayerSearch(value) {
+  matchPlayerSearchText = String(value || "");
+}
+
+export function setMatchPlayerPositionFilter(value) {
+  matchPlayerPositionFilter = MATCH_PLAYER_FILTERS.includes(value) ? value : "All";
+}
+
+export function getVisibleMatchSelectionPlayerIds() {
+  return [...visibleMatchSelectionPlayerIds];
 }
 
 function buildProfileClaimLink(claimCode) {
@@ -3382,6 +3483,9 @@ function resetMatchSetupState() {
   editingMatchSnapshot = null;
   originalEditingMatchId = "";
   hasPendingMatchEdits = false;
+  matchPlayerSearchText = "";
+  matchPlayerPositionFilter = "All";
+  visibleMatchSelectionPlayerIds = [];
   clearManualSwapSelection();
   clearMatchGuestPlayers();
   clearTeams();

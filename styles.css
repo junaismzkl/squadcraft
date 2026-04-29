@@ -2184,6 +2184,114 @@ select:focus {
   min-height: 18px;
 }
 
+.match-player-tools {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.match-player-tools input[type="search"] {
+  min-height: 46px;
+  color: #f8f3df;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.04), rgba(214, 191, 116, 0.06)),
+    #182230;
+  border-color: rgba(214, 191, 116, 0.2);
+  border-radius: 14px;
+}
+
+.match-player-tools input[type="search"]::placeholder {
+  color: rgba(248, 243, 223, 0.5);
+}
+
+.match-player-filters,
+.selected-player-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.match-player-filter {
+  min-height: 34px;
+  padding: 7px 11px;
+  color: #f8f3df;
+  background: rgba(31, 41, 55, 0.86);
+  border: 1px solid rgba(214, 191, 116, 0.18);
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.match-player-filter.active {
+  color: #111827;
+  background: linear-gradient(135deg, #ffe082 0%, #d4af37 100%);
+  border-color: rgba(255, 215, 0, 0.55);
+}
+
+.selected-player-summary {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  background: rgba(15, 23, 32, 0.62);
+  border: 1px solid rgba(214, 191, 116, 0.14);
+  border-radius: 12px;
+}
+
+.selected-player-summary-header {
+  color: #f8f3df;
+  font-size: 0.86rem;
+  font-weight: 900;
+}
+
+.selected-player-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  min-height: 30px;
+  padding: 5px 7px 5px 10px;
+  color: #f8f3df;
+  background: rgba(31, 41, 55, 0.92);
+  border: 1px solid rgba(214, 191, 116, 0.22);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.selected-player-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selected-player-chip small {
+  color: #d4af37;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.selected-player-chip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  color: #111827;
+  background: #d4af37;
+  border-radius: 999px;
+  font-size: 1rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+#match-step-players .selection-list {
+  display: grid;
+  gap: 10px;
+  padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+}
+
 .select-player-guest {
   justify-content: space-between;
   background: linear-gradient(135deg, rgba(255, 215, 0, 0.1), rgba(255, 255, 255, 0.04));

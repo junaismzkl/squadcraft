@@ -376,6 +376,20 @@
               <h3>Select Players</h3>
               <button class="ghost" id="select-all-players" type="button">Select All</button>
             </div>
+            <div class="match-player-tools">
+              <input id="match-player-search" type="search" placeholder="Search players by name, position, or rating..." autocomplete="off">
+              <div class="match-player-filters" id="match-player-filters" aria-label="Filter players">
+                <button class="match-player-filter active" type="button" data-match-player-filter="All">All</button>
+                <button class="match-player-filter" type="button" data-match-player-filter="GK">GK</button>
+                <button class="match-player-filter" type="button" data-match-player-filter="CB">CB</button>
+                <button class="match-player-filter" type="button" data-match-player-filter="WB">WB</button>
+                <button class="match-player-filter" type="button" data-match-player-filter="CM">CM</button>
+                <button class="match-player-filter" type="button" data-match-player-filter="WF">WF</button>
+                <button class="match-player-filter" type="button" data-match-player-filter="CF">CF</button>
+                <button class="match-player-filter" type="button" data-match-player-filter="Selected">Selected</button>
+              </div>
+              <div class="selected-player-summary" id="selected-player-summary"></div>
+            </div>
             <div class="selection-list" id="match-player-list"></div>
             <div class="form-actions match-step-actions">
               <button class="ghost" id="match-back-to-time" type="button">Back</button>
